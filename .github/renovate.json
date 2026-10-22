@@ -4,6 +4,7 @@
   "gomod": { "enabled": true },
   "nix": { "enabled": true },
   "postUpgradeTasks": {
-    "nixFmt": { "commands": ["nix", "fmt"], "installTools": { "nix": {} } }
+    "commands": ["nix fmt"],
+    "executionMode": "branch"
   }
 }
