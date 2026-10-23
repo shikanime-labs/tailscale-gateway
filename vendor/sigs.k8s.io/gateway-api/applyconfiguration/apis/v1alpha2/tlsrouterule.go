@@ -25,8 +25,32 @@ import (
 
 // TLSRouteRuleApplyConfiguration represents a declarative configuration of the TLSRouteRule type for use
 // with apply.
+//
+// TLSRouteRule is the configuration for a given rule.
 type TLSRouteRuleApplyConfiguration struct {
-	Name        *v1.SectionName                       `json:"name,omitempty"`
+	// Name is the name of the route rule. This name MUST be unique within a Route if it is set.
+	Name *v1.SectionName `json:"name,omitempty"`
+	// BackendRefs defines the backend(s) where matching requests should be
+	// sent. If unspecified or invalid (refers to a nonexistent resource or
+	// a Service with no endpoints), the rule performs no forwarding; if no
+	// filters are specified that would result in a response being sent, the
+	// underlying implementation must actively reject request attempts to this
+	// backend, by rejecting the connection. Request rejections must respect
+	// weight; if an invalid backend is requested to have 80% of requests, then
+	// 80% of requests must be rejected instead.
+	//
+	// When a TLSRoute is attached to a listener in Terminate mode, a BackendTLSPolicy
+	// can be used to enable re-encryption of the traffic to the backends.
+	//
+	// Support: Core for Kubernetes Service
+	//
+	// Support: Extended for Kubernetes ServiceImport
+	//
+	// Support: Implementation-specific for any other resource
+	//
+	// Support for weight: Extended
+	//
+	// Support for BackendTLSPolicy: Extended
 	BackendRefs []apisv1.BackendRefApplyConfiguration `json:"backendRefs,omitempty"`
 }
 

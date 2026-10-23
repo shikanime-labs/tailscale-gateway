@@ -24,12 +24,35 @@ import (
 
 // SessionPersistenceApplyConfiguration represents a declarative configuration of the SessionPersistence type for use
 // with apply.
+//
+// SessionPersistence defines the desired state of SessionPersistence.
 type SessionPersistenceApplyConfiguration struct {
-	SessionName     *string                         `json:"sessionName,omitempty"`
-	AbsoluteTimeout *apisv1.Duration                `json:"absoluteTimeout,omitempty"`
-	IdleTimeout     *apisv1.Duration                `json:"idleTimeout,omitempty"`
-	Type            *apisv1.SessionPersistenceType  `json:"type,omitempty"`
-	CookieConfig    *CookieConfigApplyConfiguration `json:"cookieConfig,omitempty"`
+	// SessionName defines the name of the persistent session token
+	// which may be reflected in the cookie or the header. Users
+	// should avoid reusing session names to prevent unintended
+	// consequences, such as rejection or unpredictable behavior.
+	//
+	// Support: Implementation-specific
+	SessionName *string `json:"sessionName,omitempty"`
+	// AbsoluteTimeout defines the absolute timeout of the persistent
+	// session. Once the AbsoluteTimeout duration has elapsed, the
+	// session becomes invalid.
+	//
+	// Support: Extended
+	AbsoluteTimeout *apisv1.Duration `json:"absoluteTimeout,omitempty"`
+	// Type defines the type of session persistence such as through
+	// the use of a header or cookie. Defaults to cookie based session
+	// persistence.
+	//
+	// Support: Core for "Cookie" type
+	//
+	// Support: Extended for "Header" type
+	Type *apisv1.SessionPersistenceType `json:"type,omitempty"`
+	// CookieConfig provides configuration settings that are specific
+	// to cookie-based session persistence.
+	//
+	// Support: Core
+	CookieConfig *CookieConfigApplyConfiguration `json:"cookieConfig,omitempty"`
 }
 
 // SessionPersistenceApplyConfiguration constructs a declarative configuration of the SessionPersistence type for use with
@@ -51,14 +74,6 @@ func (b *SessionPersistenceApplyConfiguration) WithSessionName(value string) *Se
 // If called multiple times, the AbsoluteTimeout field is set to the value of the last call.
 func (b *SessionPersistenceApplyConfiguration) WithAbsoluteTimeout(value apisv1.Duration) *SessionPersistenceApplyConfiguration {
 	b.AbsoluteTimeout = &value
-	return b
-}
-
-// WithIdleTimeout sets the IdleTimeout field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the IdleTimeout field is set to the value of the last call.
-func (b *SessionPersistenceApplyConfiguration) WithIdleTimeout(value apisv1.Duration) *SessionPersistenceApplyConfiguration {
-	b.IdleTimeout = &value
 	return b
 }
 
