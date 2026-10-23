@@ -73,6 +73,12 @@ type Distro struct {
 	CodeName string `json:"codeName"`
 }
 
+type DevicePostureIdentity struct {
+	SerialNumbers     []string `json:"serialNumbers"`
+	Disabled          bool     `json:"disabled"`
+	HardwareAddresses []string `json:"hardwareAddresses,omitempty"`
+}
+
 type Device struct {
 	Addresses                 []string `json:"addresses"`
 	Name                      string   `json:"name"`
@@ -99,11 +105,12 @@ type Device struct {
 	UpdateAvailable           bool     `json:"updateAvailable"`
 
 	// The below are only included in listings when querying `all` fields.
-	SSHEnabled         bool                `json:"sshEnabled"`
-	AdvertisedRoutes   []string            `json:"AdvertisedRoutes"`
-	EnabledRoutes      []string            `json:"enabledRoutes"`
-	ClientConnectivity *ClientConnectivity `json:"clientConnectivity"`
-	Distro             *Distro             `json:"distro"`
+	PostureIdentity    *DevicePostureIdentity `json:"postureIdentity"`
+	SSHEnabled         bool                   `json:"sshEnabled"`
+	AdvertisedRoutes   []string               `json:"AdvertisedRoutes"`
+	EnabledRoutes      []string               `json:"enabledRoutes"`
+	ClientConnectivity *ClientConnectivity    `json:"clientConnectivity"`
+	Distro             *Distro                `json:"distro"`
 }
 
 type DevicePostureAttributes struct {
@@ -183,30 +190,96 @@ func (dr *DevicesResource) DeletePostureAttribute(ctx context.Context, deviceID,
 	return dr.do(req, nil)
 }
 
+// IncludeFields controls the subset of fields returned in the response.
+type IncludeFields string
+
+const (
+	// IncludeFieldsDefault omits EnabledRoutes, AdvertisedRoutes, and ClientConnectivity.
+	IncludeFieldsDefault IncludeFields = "default"
+	// IncludeFieldsAll returns all fields in the response.
+	IncludeFieldsAll IncludeFields = "all"
+)
+
+func (i IncludeFields) String() string {
+	return string(i)
+}
+
+// WithFields specifies which fields to include in the response.
+// Use [IncludeFieldsAll] for all fields, or [IncludeFieldsDefault] for the standard set.
+func WithFields(fields IncludeFields) ListDevicesOptions {
+	return func(o *listDevicesOptions) {
+		o.fields = fields
+	}
+}
+
+func WithFilter(key string, values []string) ListDevicesOptions {
+	return func(o *listDevicesOptions) {
+		if o.filters == nil {
+			o.filters = make(map[string][]string)
+		}
+		o.filters[key] = values
+	}
+}
+
+type ListDevicesOptions func(*listDevicesOptions)
+
+// listDevicesOptions specifies optional parameters for listing devices.
+type listDevicesOptions struct {
+	// fields specifies which fields to include in the response.
+	// Defaults to [IncludeFieldsDefault] if empty.
+	fields IncludeFields
+
+	// filters specifies filter parameters for listing devices.
+	// The key is the device attribute name, the values are the permitted matches.
+	//
+	// Example:
+	//  filters := map[string][]string{
+	//      "isEphemeral": {"true"},
+	//      "os": {"linux"},
+	//      "tags": {"tag:prod", "tag:server"},
+	//  }
+	filters map[string][]string
+}
+
 // ListWithAllFields lists every [Device] in the tailnet. Each [Device] in
 // the response will have all fields populated.
+//
+// Deprecated: Use List(ctx, WithFields(IncludeFieldsAll)) instead.
 func (dr *DevicesResource) ListWithAllFields(ctx context.Context) ([]Device, error) {
-	return dr.list(ctx, true)
+	return dr.List(ctx, WithFields(IncludeFieldsAll))
 }
 
-// List lists every [Device] in the tailnet. The fields `EnabledRoutes`,
-// `AdvertisedRoutes` and `ClientConnectivity` will be omitted from the resulting
-// [Devices]. To get these fields, use `ListWithAllFields`.
-func (dr *DevicesResource) List(ctx context.Context) ([]Device, error) {
-	return dr.list(ctx, false)
-}
-
-func (dr *DevicesResource) list(ctx context.Context, allFields bool) ([]Device, error) {
+// List lists devices in the tailnet with the specified options.
+// If no options are specified, it defaults to [IncludeFieldsDefault], which
+// omits EnabledRoutes, AdvertisedRoutes, and ClientConnectivity.
+//
+// To include all fields, pass the [WithFields] option with [IncludeFieldsAll].
+func (dr *DevicesResource) List(ctx context.Context, opts ...ListDevicesOptions) ([]Device, error) {
 	req, err := dr.buildRequest(ctx, http.MethodGet, dr.buildTailnetURL("devices"))
 	if err != nil {
 		return nil, err
 	}
 
-	if allFields {
-		q := req.URL.Query()
-		q.Set("fields", "all")
-		req.URL.RawQuery = q.Encode()
+	q := req.URL.Query()
+
+	ldo := listDevicesOptions{}
+	for _, apply := range opts {
+		apply(&ldo)
 	}
+
+	if ldo.fields != "" {
+		q.Set("fields", ldo.fields.String())
+	}
+
+	if ldo.filters != nil {
+		for key, values := range ldo.filters {
+			for _, value := range values {
+				q.Add(key, value)
+			}
+		}
+	}
+
+	req.URL.RawQuery = q.Encode()
 
 	m := make(map[string][]Device)
 	err = dr.do(req, &m)
