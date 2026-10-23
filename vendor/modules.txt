@@ -46,7 +46,7 @@ github.com/go-json-experiment/json/internal/jsonflags
 github.com/go-json-experiment/json/internal/jsonopts
 github.com/go-json-experiment/json/internal/jsonwire
 github.com/go-json-experiment/json/jsontext
-# github.com/go-logr/logr v1.4.3
+# github.com/go-logr/logr v1.4.4
 ## explicit; go 1.18
 github.com/go-logr/logr
 github.com/go-logr/logr/slogr
