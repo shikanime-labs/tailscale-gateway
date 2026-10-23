@@ -1,6 +1,6 @@
 module github.com/shikanime-studio/tailscale-gateway
 
-go 1.25.5
+go 1.26
 
 require (
 	github.com/brianvoe/gofakeit/v7 v7.6.0
@@ -11,7 +11,7 @@ require (
 	k8s.io/api v0.35.0
 	k8s.io/apimachinery v0.35.0
 	k8s.io/client-go v0.35.0
-	k8s.io/utils v0.0.0-20251222233032-718f0e51e6d2
+	k8s.io/utils v0.0.0-20261023123148-ca04ba58ecab
 	sigs.k8s.io/controller-runtime v0.22.4
 	sigs.k8s.io/gateway-api v1.4.1
 	tailscale.com v1.92.4
