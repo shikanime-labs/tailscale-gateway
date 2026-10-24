@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 //go:build !ios
@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"runtime/debug"
 	"strings"
 )
 
@@ -20,6 +21,15 @@ import (
 // using os.Executable. If os.Executable fails (it shouldn't), then
 // "cmd" is returned.
 func CmdName() string {
+	// On non-Windows, the modinfo embedded in the running binary is
+	// authoritative and avoids re-reading the executable from disk.
+	// Windows needs the executable-name-based GUI override in cmdName,
+	// so it still takes the slower path.
+	if runtime.GOOS != "windows" {
+		if info, ok := debug.ReadBuildInfo(); ok && info.Path != "" {
+			return path.Base(info.Path)
+		}
+	}
 	e, err := os.Executable()
 	if err != nil {
 		return "cmd"
@@ -39,7 +49,7 @@ func cmdName(exe string) string {
 	}
 	// v is like:
 	// "path\ttailscale.com/cmd/tailscale\nmod\ttailscale.com\t(devel)\t\ndep\tgithub.com/apenwarr/fixconsole\tv0.0.0-20191012055117-5a9f6489cc29\th1:muXWUcay7DDy1/hEQWrYlBy+g0EuwT70sBHg65SeUc4=\ndep\tgithub....
-	for _, line := range strings.Split(info, "\n") {
+	for line := range strings.SplitSeq(info, "\n") {
 		if goPkg, ok := strings.CutPrefix(line, "path\t"); ok { // like "tailscale.com/cmd/tailscale"
 			ret = path.Base(goPkg) // goPkg is always forward slashes; use path, not filepath
 			break

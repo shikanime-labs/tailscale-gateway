@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 //go:build ts_mutex_debug
@@ -13,6 +13,10 @@ type Mutex struct {
 
 type RWMutex struct {
 	sync.RWMutex
+}
+
+func RequiresMutex(mu *sync.Mutex) {
+	// TODO: check
 }
 
 // TODO(bradfitz): actually track stuff when in debug mode.
