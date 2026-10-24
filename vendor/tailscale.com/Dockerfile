@@ -1,4 +1,4 @@
-# Copyright (c) Tailscale Inc & AUTHORS
+# Copyright (c) Tailscale Inc & contributors
 # SPDX-License-Identifier: BSD-3-Clause
 
 # Note that this Dockerfile is currently NOT used to build any of the published
@@ -36,9 +36,33 @@
 #     $ docker exec tailscaled tailscale status
 
 
-FROM golang:1.25-alpine AS build-env
+# Use Tailscale's Go toolchain (a fork of Go) as specified by the
+# go.toolchain.rev file, matching how everything else in this repo is
+# built, rather than the golang Docker image. This avoids this
+# Dockerfile breaking for a day or two after each Go minor version
+# bump, when go.mod requires a Go version that the official golang
+# Docker image doesn't yet ship. See
+# https://github.com/tailscale/tailscale/issues/21072
+FROM alpine:3.22 AS build-env
 
 WORKDIR /go/src/tailscale
+
+RUN apk add --no-cache curl tar
+
+COPY go.toolchain.rev ./
+RUN read -r REV <go.toolchain.rev && \
+    case "$(apk --print-arch)" in \
+        x86_64) ARCH=amd64 ;; \
+        aarch64) ARCH=arm64 ;; \
+        *) echo "unsupported architecture" >&2; exit 1 ;; \
+    esac && \
+    curl --retry 3 -f -L -o /tmp/go.tar.gz "https://github.com/tailscale/go/releases/download/build-${REV}/linux-${ARCH}.tar.gz" && \
+    mkdir -p /usr/local/go && \
+    tar -C /usr/local/go --strip-components=1 -xzf /tmp/go.tar.gz && \
+    rm /tmp/go.tar.gz
+
+ENV GOPATH=/go
+ENV PATH=/usr/local/go/bin:$GOPATH/bin:$PATH
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -73,8 +97,13 @@ RUN GOARCH=$TARGETARCH go install -ldflags="\
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates iptables iproute2 ip6tables
-RUN ln -s /sbin/iptables-legacy /sbin/iptables
-RUN ln -s /sbin/ip6tables-legacy /sbin/ip6tables
+# Alpine 3.19 replaced legacy iptables with nftables based implementation.
+# Tailscale is used on some hosts that don't support nftables, such as Synology
+# NAS, so link iptables back to legacy version. Hosts that don't require legacy
+# iptables should be able to use Tailscale in nftables mode.  See
+# https://github.com/tailscale/tailscale/issues/17854
+RUN rm /usr/sbin/iptables && ln -s /usr/sbin/iptables-legacy /usr/sbin/iptables
+RUN rm /usr/sbin/ip6tables && ln -s /usr/sbin/ip6tables-legacy /usr/sbin/ip6tables
 
 COPY --from=build-env /go/bin/* /usr/local/bin/
 # For compat with the previous run.sh, although ideally you should be

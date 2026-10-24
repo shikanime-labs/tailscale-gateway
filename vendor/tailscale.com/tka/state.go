@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 //go:build !ts_omit_tailnetlock
@@ -7,11 +7,13 @@ package tka
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 
 	"golang.org/x/crypto/argon2"
 	"tailscale.com/types/tkatype"
+	"tailscale.com/util/testenv"
 )
 
 // ErrNoSuchKey is returned if the key referenced by a KeyID does not exist.
@@ -28,9 +30,13 @@ type State struct {
 	// is the same as the LastAUMHash.
 	LastAUMHash *AUMHash `cbor:"1,keyasint"`
 
-	// DisablementSecrets are KDF-derived values which can be used
-	// to turn off the TKA in the event of a consensus-breaking bug.
-	DisablementSecrets [][]byte `cbor:"2,keyasint"`
+	// DisablementValues are KDF-derived values used to verify that a caller
+	// possesses a valid DisablementSecret. These values are used during the
+	// Tailnet Lock deactivation process.
+	//
+	// These are safe to share publicly or store in the clear. They cannot be
+	// used to derive the original DisablementSecret.
+	DisablementValues [][]byte `cbor:"2,keyasint"`
 
 	// Keys are the public keys of either:
 	//
@@ -78,11 +84,11 @@ func (s State) Clone() State {
 		out.LastAUMHash = &dupe
 	}
 
-	if s.DisablementSecrets != nil {
-		out.DisablementSecrets = make([][]byte, len(s.DisablementSecrets))
-		for i := range s.DisablementSecrets {
-			out.DisablementSecrets[i] = make([]byte, len(s.DisablementSecrets[i]))
-			copy(out.DisablementSecrets[i], s.DisablementSecrets[i])
+	if s.DisablementValues != nil {
+		out.DisablementValues = make([][]byte, len(s.DisablementValues))
+		for i := range s.DisablementValues {
+			out.DisablementValues[i] = make([]byte, len(s.DisablementValues[i]))
+			copy(out.DisablementValues[i], s.DisablementValues[i])
 		}
 	}
 
@@ -113,7 +119,7 @@ var disablementSalt = []byte("tailscale network-lock disablement salt")
 // key authority, but cannot be reversed to find the input secret.
 //
 // When the output of this function is stored in tka state (i.e. in
-// tka.State.DisablementSecrets) a call to Authority.ValidDisablement()
+// tka.State.DisablementValues) a call to Authority.ValidDisablement()
 // with the input of this function as the argument will return true.
 func DisablementKDF(secret []byte) []byte {
 	// time = 4 (3 recommended, booped to 4 to compensate for less memory)
@@ -126,8 +132,8 @@ func DisablementKDF(secret []byte) []byte {
 // checkDisablement returns true for a valid disablement secret.
 func (s State) checkDisablement(secret []byte) bool {
 	derived := DisablementKDF(secret)
-	for _, candidate := range s.DisablementSecrets {
-		if bytes.Equal(derived, candidate) {
+	for _, candidate := range s.DisablementValues {
+		if subtle.ConstantTimeCompare(derived, candidate) == 1 {
 			return true
 		}
 	}
@@ -247,30 +253,23 @@ func (s State) applyVerifiedAUM(update AUM) (State, error) {
 	}
 }
 
-// Upper bound on checkpoint elements, chosen arbitrarily. Intended to
-// cap out insanely large AUMs.
-const (
-	maxDisablementSecrets = 32
-	maxKeys               = 512
-)
-
 // staticValidateCheckpoint validates that the state is well-formed for
 // inclusion in a checkpoint AUM.
 func (s *State) staticValidateCheckpoint() error {
 	if s.LastAUMHash != nil {
 		return errors.New("cannot specify a parent AUM")
 	}
-	if len(s.DisablementSecrets) == 0 {
+	if len(s.DisablementValues) == 0 {
 		return errors.New("at least one disablement secret required")
 	}
-	if numDS := len(s.DisablementSecrets); numDS > maxDisablementSecrets {
-		return fmt.Errorf("too many disablement secrets (%d, max %d)", numDS, maxDisablementSecrets)
+	if numDS := len(s.DisablementValues); numDS > maxDisablementValues {
+		return fmt.Errorf("too many disablement values (%d, max %d)", numDS, maxDisablementValues)
 	}
-	for i, ds := range s.DisablementSecrets {
+	for i, ds := range s.DisablementValues {
 		if len(ds) != disablementLength {
 			return fmt.Errorf("disablement[%d]: invalid length (got %d, want %d)", i, len(ds), disablementLength)
 		}
-		for j, ds2 := range s.DisablementSecrets {
+		for j, ds2 := range s.DisablementValues {
 			if i == j {
 				continue
 			}
@@ -314,4 +313,19 @@ func (s *State) staticValidateCheckpoint() error {
 		}
 	}
 	return nil
+}
+
+// CreateStateForTest creates a [State] that marks the given keys as trusted
+// with an arbitrary disablement value.
+//
+// This is only for use in tests, and will panic if called outside a test.
+func CreateStateForTest(keys ...Key) State {
+	testenv.AssertInTest()
+
+	disablementSecret := bytes.Repeat([]byte{0xa5}, 32)
+
+	return State{
+		Keys:              keys,
+		DisablementValues: [][]byte{DisablementKDF(disablementSecret)},
+	}
 }
