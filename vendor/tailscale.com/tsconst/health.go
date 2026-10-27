@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 package tsconst
@@ -23,4 +23,5 @@ const (
 	HealthWarnableTestWarnable              = "test-warnable"
 	HealthWarnableApplyDiskConfig           = "apply-disk-config"
 	HealthWarnableWarmingUp                 = "warming-up"
+	HealthWarnableTLSCertPending            = "tls-cert-pending"
 )

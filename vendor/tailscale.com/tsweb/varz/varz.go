@@ -1,11 +1,10 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 // Package varz contains code to export metrics in Prometheus format.
 package varz
 
 import (
-	"bufio"
 	"cmp"
 	"expvar"
 	"fmt"
@@ -23,10 +22,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"golang.org/x/exp/constraints"
 	"tailscale.com/metrics"
 	"tailscale.com/syncs"
-	"tailscale.com/types/logger"
 	"tailscale.com/version"
 )
 
@@ -42,7 +39,33 @@ func init() {
 	expvar.Publish("go_version", StaticStringVar(runtime.Version()))
 	expvar.Publish("counter_uptime_sec", expvar.Func(func() any { return int64(Uptime().Seconds()) }))
 	expvar.Publish("gauge_goroutines", expvar.Func(func() any { return runtime.NumGoroutine() }))
+	if v := nodeBootTime(); v != 0 {
+		var vi any = v // box once
+		// The name matches what Prometheus's node exporter uses
+		// for the same value.
+		expvar.Publish("node_boot_time_seconds", expvar.Func(func() any { return vi }))
+	}
 }
+
+// nodeBootTime returns the machine's boot time in Unix seconds,
+// as reported by the "btime" line of Linux's /proc/stat.
+// It returns 0 if unavailable, such as on non-Linux systems.
+var nodeBootTime = sync.OnceValue(func() int64 {
+	stat, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return 0
+	}
+	for line := range strings.Lines(string(stat)) {
+		if rest, ok := strings.CutPrefix(line, "btime "); ok {
+			sec, err := strconv.ParseInt(strings.TrimSpace(rest), 10, 64)
+			if err != nil {
+				return 0
+			}
+			return sec
+		}
+	}
+	return 0
+})
 
 const (
 	gaugePrefix     = "gauge_"
@@ -93,8 +116,8 @@ func prometheusMetric(prefix string, key string) (string, string, string) {
 		typ = "histogram"
 		key = strings.TrimPrefix(key, histogramPrefix)
 	}
-	if strings.HasPrefix(key, labelMapPrefix) {
-		key = strings.TrimPrefix(key, labelMapPrefix)
+	if after, ok := strings.CutPrefix(key, labelMapPrefix); ok {
+		key = after
 		if a, b, ok := strings.Cut(key, "_"); ok {
 			label, key = a, b
 		}
@@ -154,7 +177,7 @@ func writePromExpVar(w io.Writer, prefix string, kv expvar.KeyValue) {
 	case PrometheusMetricsReflectRooter:
 		root := v.PrometheusMetricsReflectRoot()
 		rv := reflect.ValueOf(root)
-		if rv.Type().Kind() == reflect.Ptr {
+		if rv.Type().Kind() == reflect.Pointer {
 			if rv.IsNil() {
 				return
 			}
@@ -189,11 +212,14 @@ func writePromExpVar(w io.Writer, prefix string, kv expvar.KeyValue) {
 	if typ == "" {
 		var funcRet string
 		if f, ok := kv.Value.(expvar.Func); ok {
-			v := f()
-			if ms, ok := v.(runtime.MemStats); ok && name == "memstats" {
-				writeMemstats(w, &ms)
+			if key == "memstats" {
+				// The expvar package's own memstats var calls
+				// runtime.ReadMemStats, which stops the world and
+				// allocates. [Handler] exports the memstats_* metrics
+				// from runtime/metrics instead, so don't even call it.
 				return
 			}
+			v := f()
 			if vs, ok := v.(string); ok && strings.HasSuffix(name, "version") {
 				if name == "version" {
 					fmt.Fprintf(w, "%s{version=%q,binary=%q} 1\n", name, vs, binaryName())
@@ -245,11 +271,21 @@ func writePromExpVar(w io.Writer, prefix string, kv expvar.KeyValue) {
 		if label != "" && typ != "" {
 			fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
 			v.Do(func(kv expvar.KeyValue) {
-				fmt.Fprintf(w, "%s{%s=%q} %v\n", name, label, kv.Key, kv.Value)
+				switch kv.Value.(type) {
+				case *expvar.Int, *expvar.Float:
+					fmt.Fprintf(w, "%s{%s=%q} %v\n", name, label, kv.Key, kv.Value)
+				default:
+					fmt.Fprintf(w, "# skipping %q expvar map key %q with unknown value type %T\n", name, kv.Key, kv.Value)
+				}
 			})
 		} else {
 			v.Do(func(kv expvar.KeyValue) {
-				fmt.Fprintf(w, "%s_%s %v\n", name, kv.Key, kv.Value)
+				switch kv.Value.(type) {
+				case *expvar.Int, *expvar.Float:
+					fmt.Fprintf(w, "%s_%s %v\n", name, kv.Key, kv.Value)
+				default:
+					fmt.Fprintf(w, "# skipping %q expvar map key %q with unknown value type %T\n", name, kv.Key, kv.Value)
+				}
 			})
 		}
 	}
@@ -292,13 +328,19 @@ type sortedKVs struct {
 //     is not exported.
 //
 // This will evolve over time, or perhaps be replaced.
+//
+// It also exports the Go runtime/metrics in [runtimeMetricSpecs] and
+// the legacy memstats_* metrics, both read from runtime/metrics.
 func Handler(w http.ResponseWriter, r *http.Request) {
 	ExpvarDoHandler(expvarDo)(w, r)
+	runtimeMetrics.writeTo(w)
 }
 
 // ExpvarDoHandler handler returns a Handler like above, but takes an optional
 // expvar.Do func allow the usage of alternative containers of metrics, other
 // than the global expvar.Map.
+//
+// Unlike [Handler], it does not export the Go runtime/metrics.
 func ExpvarDoHandler(expvarDoFunc func(f func(expvar.KeyValue))) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain;version=0.0.4;charset=utf-8")
@@ -342,54 +384,6 @@ type PrometheusMetricsReflectRooter interface {
 
 var expvarDo = expvar.Do // pulled out for tests
 
-func writeMemstat[V constraints.Integer | constraints.Float](bw *bufio.Writer, typ, name string, v V, help string) {
-	if help != "" {
-		bw.WriteString("# HELP memstats_")
-		bw.WriteString(name)
-		bw.WriteString(" ")
-		bw.WriteString(help)
-		bw.WriteByte('\n')
-	}
-	bw.WriteString("# TYPE memstats_")
-	bw.WriteString(name)
-	bw.WriteString(" ")
-	bw.WriteString(typ)
-	bw.WriteByte('\n')
-	bw.WriteString("memstats_")
-	bw.WriteString(name)
-	bw.WriteByte(' ')
-	rt := reflect.TypeOf(v)
-	switch {
-	case rt == reflect.TypeFor[int]() ||
-		rt == reflect.TypeFor[uint]() ||
-		rt == reflect.TypeFor[int8]() ||
-		rt == reflect.TypeFor[uint8]() ||
-		rt == reflect.TypeFor[int16]() ||
-		rt == reflect.TypeFor[uint16]() ||
-		rt == reflect.TypeFor[int32]() ||
-		rt == reflect.TypeFor[uint32]() ||
-		rt == reflect.TypeFor[int64]() ||
-		rt == reflect.TypeFor[uint64]() ||
-		rt == reflect.TypeFor[uintptr]():
-		bw.Write(strconv.AppendInt(bw.AvailableBuffer(), int64(v), 10))
-	case rt == reflect.TypeFor[float32]() || rt == reflect.TypeFor[float64]():
-		bw.Write(strconv.AppendFloat(bw.AvailableBuffer(), float64(v), 'f', -1, 64))
-	}
-	bw.WriteByte('\n')
-}
-
-func writeMemstats(w io.Writer, ms *runtime.MemStats) {
-	fmt.Fprintf(w, "%v", logger.ArgWriter(func(bw *bufio.Writer) {
-		writeMemstat(bw, "gauge", "heap_alloc", ms.HeapAlloc, "current bytes of allocated heap objects (up/down smoothly)")
-		writeMemstat(bw, "counter", "total_alloc", ms.TotalAlloc, "cumulative bytes allocated for heap objects")
-		writeMemstat(bw, "gauge", "sys", ms.Sys, "total bytes of memory obtained from the OS")
-		writeMemstat(bw, "counter", "mallocs", ms.Mallocs, "cumulative count of heap objects allocated")
-		writeMemstat(bw, "counter", "frees", ms.Frees, "cumulative count of heap objects freed")
-		writeMemstat(bw, "counter", "num_gc", ms.NumGC, "number of completed GC cycles")
-		writeMemstat(bw, "gauge", "gc_cpu_fraction", ms.GCCPUFraction, "fraction of CPU time used by GC")
-	}))
-}
-
 // sortedStructField is metadata about a struct field used both for sorting once
 // (by structTypeSortedFields) and at serving time (by
 // foreachExportedStructField).
@@ -409,8 +403,7 @@ func structTypeSortedFields(t reflect.Type) []sortedStructField {
 		return v.([]sortedStructField)
 	}
 	fields := make([]sortedStructField, 0, t.NumField())
-	for i, n := 0, t.NumField(); i < n; i++ {
-		sf := t.Field(i)
+	for sf := range t.Fields() {
 		name := sf.Name
 		if v := sf.Tag.Get("json"); v != "" {
 			v, _, _ = strings.Cut(v, ",")
@@ -423,7 +416,7 @@ func structTypeSortedFields(t reflect.Type) []sortedStructField {
 			}
 		}
 		fields = append(fields, sortedStructField{
-			Index:           i,
+			Index:           sf.Index[0],
 			Name:            name,
 			SortName:        removeTypePrefixes(name),
 			MetricType:      sf.Tag.Get("metrictype"),
@@ -457,7 +450,7 @@ func foreachExportedStructField(rv reflect.Value, f func(fieldOrJSONName, metric
 		sf := ssf.StructFieldType
 		if ssf.MetricType != "" || sf.Type.Kind() == reflect.Struct {
 			f(ssf.Name, ssf.MetricType, rv.Field(ssf.Index))
-		} else if sf.Type.Kind() == reflect.Ptr && sf.Type.Elem().Kind() == reflect.Struct {
+		} else if sf.Type.Kind() == reflect.Pointer && sf.Type.Elem().Kind() == reflect.Struct {
 			fv := rv.Field(ssf.Index)
 			if !fv.IsNil() {
 				f(ssf.Name, ssf.MetricType, fv.Elem())

@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 // Package tailcfg contains types used by the Tailscale protocol with between
@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"tailscale.com/feature/buildfeatures"
+	"tailscale.com/tailcfg/nodecap"
+	"tailscale.com/tailcfg/peercap"
 	"tailscale.com/types/dnstype"
 	"tailscale.com/types/key"
 	"tailscale.com/types/opt"
@@ -178,7 +180,24 @@ type CapabilityVersion int
 //   - 129: 2025-10-04: Fixed sleep/wake deadlock in magicsock when using peer relay (PR #17449)
 //   - 130: 2025-10-06: client can send key.HardwareAttestationPublic and key.HardwareAttestationKeySignature in MapRequest
 //   - 131: 2025-11-25: client respects [NodeAttrDefaultAutoUpdate]
-const CurrentCapabilityVersion CapabilityVersion = 131
+//   - 132: 2026-02-13: client respects [NodeAttrDisableHostsFileUpdates]
+//   - 133: 2026-02-17: client understands [NodeAttrForceRegisterMagicDNSIPv4Only]; MagicDNS IPv6 registered w/ OS by default
+//   - 134: 2026-03-09: Client understands [NodeAttrDisableAndroidBindToActiveNetwork]
+//   - 135: 2026-03-30: Client understands [NodeAttrCacheNetworkMaps]
+//   - 136: 2026-04-09: Client understands [NodeAttrDisableLinuxCGNATDropRule]
+//   - 137: 2026-04-15: Client handles 429 responses to /machine/register.
+//   - 138: 2026-03-31: can handle C2N /debug/tka.
+//   - 139: 2026-05-22: Client understands [NodeAttrEmitRuntimeMetrics]
+//   - 140: 2026-05-27: Client understands [NodeAttrDisableUDPGRO], [NodeAttrDisableUDPGSO], [NodeAttrDisableTUNUDPGRO], [NodeAttrDisableTUNTCPGRO]
+//   - 141: 2026-05-28: Client understands [NodeAttrNeverGSOEqualTail]
+//   - 142: 2026-07-06: Client understands c2n /remoteapi/localapi/* proxy
+//   - 143: 2026-07-22: Client correctly ignores conn25 node attributes when not enabled by environment variable
+//   - 144: 2026-07-31: Client sends [packet.TSMPDiscoKeyAdvertisement] around WireGuard handshakes
+//   - 145: 2026-08-04: Client understands [NodeAttrScopeQuad100OnMacOS]
+//   - 146: 2026-09-02: Client understands [NodeAttrConnReject]; can handle C2N /debug/rejects.
+//   - 147: 2026-09-09: Client handles 429/503 responses with retry-after headers to /machine/ endpoints
+//   - 148: 2026-09-15: Client understands [Node.StableTailnetID]
+const CurrentCapabilityVersion CapabilityVersion = 148
 
 // ID is an integer ID for a user, node, or login allocated by the
 // control plane.
@@ -243,6 +262,16 @@ func (u StableNodeID) IsZero() bool {
 	return u == ""
 }
 
+// StableTailnetID is the stable and opaque identifier of the tailnet this node
+// is a member of, as used to identify the tailnet in the Tailscale API. These
+// IDs are guaranteed to be unique across all tailnets for a single control
+// server instance, but may or may not be unique across different servers.
+type StableTailnetID string
+
+func (id StableTailnetID) IsZero() bool {
+	return id == ""
+}
+
 // User is a Tailscale user.
 //
 // A user can have multiple logins associated with it (e.g. gmail and github oauth).
@@ -280,6 +309,13 @@ type UserProfile struct {
 	LoginName     string // "alice@smith.com"; for display purposes only (provider is not listed)
 	DisplayName   string // "Alice Smith"
 	ProfilePicURL string `json:",omitzero"`
+
+	// Groups is a subset of SCIM groups (e.g. "engineering@example.com")
+	// or group names in the tailnet policy document (e.g. "group:eng")
+	// that contain this user and that the coordination server was
+	// configured to report to this node.
+	// The list is always sorted when loaded from storage.
+	Groups []string `json:",omitempty"`
 }
 
 func (p *UserProfile) Equal(p2 *UserProfile) bool {
@@ -292,7 +328,8 @@ func (p *UserProfile) Equal(p2 *UserProfile) bool {
 	return p.ID == p2.ID &&
 		p.LoginName == p2.LoginName &&
 		p.DisplayName == p2.DisplayName &&
-		p.ProfilePicURL == p2.ProfilePicURL
+		p.ProfilePicURL == p2.ProfilePicURL &&
+		slices.Equal(p.Groups, p2.Groups)
 }
 
 // RawMessage is a raw encoded JSON value. It implements Marshaler and
@@ -383,7 +420,7 @@ type Node struct {
 	//
 	// HomeDERP may be zero if not (yet) known, but ideally always be non-zero
 	// for magicsock connectivity to function normally.
-	HomeDERP int `json:",omitzero"` // DERP region ID of the node's home DERP
+	HomeDERP DERPRegionID `json:",omitzero"` // DERP region ID of the node's home DERP
 
 	Hostinfo HostinfoView      `json:",omitzero"`
 	Created  time.Time         `json:",omitzero"`
@@ -424,7 +461,7 @@ type Node struct {
 	//    "https://tailscale.com/cap/file-sharing"
 	//
 	// Deprecated: use CapMap instead. See https://github.com/tailscale/tailscale/issues/11508
-	Capabilities []NodeCapability `json:",omitempty"`
+	Capabilities []nodecap.Cap `json:",omitempty"`
 
 	// CapMap is a map of capabilities to their optional argument/data values.
 	//
@@ -435,7 +472,7 @@ type Node struct {
 	// represented by the Capabilities field, but can now be represented by
 	// CapMap with an empty value.
 	//
-	// See NodeCapability for more information on keys.
+	// See [nodecap.Cap] for more information on keys.
 	//
 	// Metadata about nodes can be transmitted in 3 ways:
 	// 1. MapResponse.Node.CapMap describes attributes that affect behavior for
@@ -517,17 +554,24 @@ type Node struct {
 	// ExitNodeDNSResolvers is the list of DNS servers that should be used when this
 	// node is marked IsWireGuardOnly and being used as an exit node.
 	ExitNodeDNSResolvers []*dnstype.Resolver `json:",omitempty"`
+
+	// StableTailnetID is the identifier of the tailnet this node is a
+	// member of.
+	//
+	// Control only populates this for the self node in a MapResponse
+	// (MapResponse.Node); it is empty for peers.
+	StableTailnetID StableTailnetID `json:",omitzero"`
 }
 
 // HasCap reports whether the node has the given capability.
 // It is safe to call on an invalid NodeView.
-func (v NodeView) HasCap(cap NodeCapability) bool {
+func (v NodeView) HasCap(cap nodecap.Cap) bool {
 	return v.ж.HasCap(cap)
 }
 
 // HasCap reports whether the node has the given capability.
 // It is safe to call on a nil Node.
-func (v *Node) HasCap(cap NodeCapability) bool {
+func (v *Node) HasCap(cap nodecap.Cap) bool {
 	return v != nil && v.CapMap.Contains(cap)
 }
 
@@ -552,7 +596,7 @@ func (n *Node) DisplayName(forOwner bool) string {
 	return n.ComputedName
 }
 
-// DisplayName returns the decomposed user-facing name for a node.
+// DisplayNames returns the decomposed user-facing name for a node.
 //
 // Parameter forOwner specifies whether the name is requested by
 // the owner of the node. When forOwner is false, hostIfDifferent
@@ -575,6 +619,18 @@ func (n *Node) DisplayNames(forOwner bool) (name, hostIfDifferent string) {
 	return n.ComputedName, ""
 }
 
+// IsRouter reports whether n is a router: it routes addresses besides its own.
+// Examples: an exit node, a subnet router, an app connector, etc.
+func (n *Node) IsRouter() bool {
+	// TODO(sfllaw): Keep this aligned with dbx.Node.IsSubnetRouter.
+	for _, r := range n.AllowedIPs {
+		if !slices.Contains(n.Addresses, r) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsTagged reports whether the node has any tags.
 func (n *Node) IsTagged() bool {
 	return len(n.Tags) > 0
@@ -584,6 +640,10 @@ func (n *Node) IsTagged() bool {
 func (n *Node) SharerOrUser() UserID {
 	return cmp.Or(n.Sharer, n.User)
 }
+
+// IsRouter reports whether n is a router: it routes addresses besides its own.
+// Examples: an exit node, a subnet router, an app connector, etc.
+func (n NodeView) IsRouter() bool { return n.ж.IsRouter() }
 
 // IsTagged reports whether the node has any tags.
 func (n NodeView) IsTagged() bool { return n.ж.IsTagged() }
@@ -862,6 +922,15 @@ type Hostinfo struct {
 	ShieldsUp       bool     `json:",omitzero"` // indicates whether the host is blocking incoming connections
 	ShareeNode      bool     `json:",omitzero"` // indicates this node exists in netmap because it's owned by a shared-to user
 	NoLogsNoSupport bool     `json:",omitzero"` // indicates that the user has opted out of sending logs and support
+
+	// RemoteConfig is whether the node has both linked
+	// feature/remoteconfig into its binary and enabled
+	// Prefs.RemoteConfig: it has delegated full remote management of
+	// its prefs and LocalAPI to the tailnet admin via the
+	// /remoteapi/localapi/* c2n endpoint. See feature/remoteconfig for
+	// the trust model.
+	RemoteConfig bool `json:",omitzero"`
+
 	// WireIngress indicates that the node would like to be wired up server-side
 	// (DNS, etc) to be able to use Tailscale Funnel, even if it's not currently
 	// enabled. For example, the user might only use it for intermittent
@@ -869,9 +938,15 @@ type Hostinfo struct {
 	// away, even if it's disabled most of the time. As an optimization, this is
 	// only sent if IngressEnabled is false, as IngressEnabled implies that this
 	// option is true.
-	WireIngress     bool           `json:",omitzero"`
-	IngressEnabled  bool           `json:",omitzero"`  // if the node has any funnel endpoint enabled
-	AllowsUpdate    bool           `json:",omitzero"`  // indicates that the node has opted-in to admin-console-drive remote updates
+	WireIngress    bool `json:",omitzero"`
+	IngressEnabled bool `json:",omitzero"` // if the node has any funnel endpoint enabled
+
+	// AllowsUpdate reports that the node has opted in to
+	// admin-console-driven remote updates and that the running binary
+	// includes client update support (the feature/clientupdate package,
+	// which tsnet apps don't include).
+	AllowsUpdate bool `json:",omitzero"`
+
 	Machine         string         `json:",omitzero"`  // the current host's machine type (uname -m)
 	GoArch          string         `json:",omitzero"`  // GOARCH value (of the built binary)
 	GoArchVar       string         `json:",omitzero"`  // GOARM, GOAMD64, etc (of the built binary)
@@ -887,6 +962,7 @@ type Hostinfo struct {
 	UserspaceRouter opt.Bool       `json:",omitzero"` // if the client's subnet router is running in userspace (netstack) mode
 	AppConnector    opt.Bool       `json:",omitzero"` // if the client is running the app-connector service
 	ServicesHash    string         `json:",omitzero"` // opaque hash of the most recent list of tailnet services, change in hash indicates config should be fetched via c2n
+	PeerRelay       bool           `json:",omitzero"` // if the client is willing to relay traffic for other peers
 	ExitNodeID      StableNodeID   `json:",omitzero"` // the client’s selected exit node, empty when unselected.
 
 	// Location represents geographical location data about a
@@ -1051,12 +1127,12 @@ type NetInfo struct {
 
 	// PreferredDERP is this node's preferred (home) DERP region ID.
 	// This is where the node expects to be contacted to begin a
-	// peer-to-peer connection. The node might be be temporarily
+	// peer-to-peer connection. The node might be temporarily
 	// connected to multiple DERP servers (to speak to other nodes
 	// that are located elsewhere) but PreferredDERP is the region ID
 	// that the node subscribes to traffic at.
 	// Zero means disconnected or unknown.
-	PreferredDERP int `json:",omitzero"`
+	PreferredDERP DERPRegionID `json:",omitzero"`
 
 	// LinkType is the current link type, if known.
 	LinkType string `json:",omitzero"` // "wired", "wifi", "mobile" (LTE, 4G, 3G, etc)
@@ -1267,7 +1343,7 @@ type RegisterRequest struct {
 	Ephemeral bool `json:",omitempty"`
 
 	// NodeKeySignature is the node's own node-key signature, re-signed
-	// for its new node key using its network-lock key.
+	// for its new node key using its tailnet-lock key.
 	//
 	// This field is set when the client retries registration after learning
 	// its NodeKeySignature (which is in need of rotation).
@@ -1511,7 +1587,7 @@ type CapGrant struct {
 	// FilterRule.SrcIPs are granted to the destination IP,
 	// matched by Dsts.
 	// Deprecated: use CapMap instead.
-	Caps []PeerCapability `json:",omitempty"`
+	Caps []peercap.Cap `json:",omitempty"`
 
 	// CapMap is a map of capabilities to their values.
 	// The key is the capability name, and the value is a list of
@@ -1519,62 +1595,40 @@ type CapGrant struct {
 	CapMap PeerCapMap `json:",omitempty"`
 }
 
-// PeerCapability represents a capability granted to a peer by a FilterRule when
-// the peer communicates with the node that has this rule. Its meaning is
-// application-defined.
+// PeerCapability is a type alias to [peercap.Cap]
+// and peer capabilities are now defined in the peercap package,
+// see [PeerCapabilityFileSharingTarget].
 //
-// It must be a URL like "https://tailscale.com/cap/file-send".
-type PeerCapability string
+//go:fix inline
+type PeerCapability = peercap.Cap
 
+// Deprecated: Peer capabilities are now defined in the peercap package, see [peercap.Cap].
+// These constants are provided for backwards compatibility
+// but no new [PeerCapability] aliases will be added to this list.
+//
+//go:fix inline
 const (
-	// PeerCapabilityFileSharingTarget grants the current node the ability to send
-	// files to the peer which has this capability.
-	PeerCapabilityFileSharingTarget PeerCapability = "https://tailscale.com/cap/file-sharing-target"
-	// PeerCapabilityFileSharingSend grants the ability to receive files from a
-	// node that's owned by a different user.
-	PeerCapabilityFileSharingSend PeerCapability = "https://tailscale.com/cap/file-send"
-	// PeerCapabilityDebugPeer grants the ability for a peer to read this node's
-	// goroutines, metrics, magicsock internal state, etc.
-	PeerCapabilityDebugPeer PeerCapability = "https://tailscale.com/cap/debug-peer"
-	// PeerCapabilityWakeOnLAN grants the ability to send a Wake-On-LAN packet.
-	PeerCapabilityWakeOnLAN PeerCapability = "https://tailscale.com/cap/wake-on-lan"
-	// PeerCapabilityIngress grants the ability for a peer to send ingress traffic.
-	PeerCapabilityIngress PeerCapability = "https://tailscale.com/cap/ingress"
-	// PeerCapabilityWebUI grants the ability for a peer to edit features from the
-	// device Web UI.
-	PeerCapabilityWebUI PeerCapability = "tailscale.com/cap/webui"
-	// PeerCapabilityTaildrive grants the ability for a peer to access Taildrive
-	// shares.
-	PeerCapabilityTaildrive PeerCapability = "tailscale.com/cap/drive"
-	// PeerCapabilityTaildriveSharer indicates that a peer has the ability to
-	// share folders with us.
-	PeerCapabilityTaildriveSharer PeerCapability = "tailscale.com/cap/drive-sharer"
-
-	// PeerCapabilityKubernetes grants a peer Kubernetes-specific
-	// capabilities, such as the ability to impersonate specific Tailscale
-	// user groups as Kubernetes user groups. This capability is read by
-	// peers that are Tailscale Kubernetes operator instances.
-	PeerCapabilityKubernetes PeerCapability = "tailscale.com/cap/kubernetes"
-
-	// PeerCapabilityRelay grants the ability for a peer to allocate relay
-	// endpoints.
-	PeerCapabilityRelay PeerCapability = "tailscale.com/cap/relay"
-	// PeerCapabilityRelayTarget grants the current node the ability to allocate
-	// relay endpoints to the peer which has this capability.
-	PeerCapabilityRelayTarget PeerCapability = "tailscale.com/cap/relay-target"
-
-	// PeerCapabilityTsIDP grants a peer tsidp-specific
-	// capabilities, such as the ability to add user groups to the OIDC
-	// claim
-	PeerCapabilityTsIDP PeerCapability = "tailscale.com/cap/tsidp"
+	PeerCapabilityFileSharingTarget = peercap.FileSharingTarget
+	PeerCapabilityFileSharingSend   = peercap.FileSharingSend
+	PeerCapabilityDebugPeer         = peercap.DebugPeer
+	PeerCapabilityWakeOnLAN         = peercap.WakeOnLAN
+	PeerCapabilityIngress           = peercap.Ingress
+	PeerCapabilityWebUI             = peercap.WebUI
+	PeerCapabilityTaildrive         = peercap.Taildrive
+	PeerCapabilityTaildriveSharer   = peercap.TaildriveSharer
+	PeerCapabilityKubernetes        = peercap.Kubernetes
+	PeerCapabilityRelay             = peercap.Relay
+	PeerCapabilityRelayTarget       = peercap.RelayTarget
+	PeerCapabilityTsIDP             = peercap.TsIDP
+	// Deprecated: Do not add any further values here, use [peercap] instead.
 )
 
 // NodeCapMap is a map of capabilities to their optional values. It is valid for
 // a capability to have no values (nil slice); such capabilities can be tested
 // for by using the [NodeCapMap.Contains] method.
 //
-// See [NodeCapability] for more information on keys.
-type NodeCapMap map[NodeCapability][]RawMessage
+// See [nodecap.Cap] for more information on keys.
+type NodeCapMap map[nodecap.Cap][]RawMessage
 
 // Equal reports whether c and c2 are equal.
 func (c NodeCapMap) Equal(c2 NodeCapMap) bool {
@@ -1584,14 +1638,14 @@ func (c NodeCapMap) Equal(c2 NodeCapMap) bool {
 // UnmarshalNodeCapJSON unmarshals each JSON value in cm[cap] as T.
 // If cap does not exist in cm, it returns (nil, nil).
 // It returns an error if the values cannot be unmarshaled into the provided type.
-func UnmarshalNodeCapJSON[T any](cm NodeCapMap, cap NodeCapability) ([]T, error) {
+func UnmarshalNodeCapJSON[T any](cm NodeCapMap, cap nodecap.Cap) ([]T, error) {
 	return UnmarshalNodeCapViewJSON[T](views.MapSliceOf(cm), cap)
 }
 
 // UnmarshalNodeCapViewJSON unmarshals each JSON value in cm.Get(cap) as T.
 // If cap does not exist in cm, it returns (nil, nil).
 // It returns an error if the values cannot be unmarshaled into the provided type.
-func UnmarshalNodeCapViewJSON[T any](cm views.MapSlice[NodeCapability, RawMessage], cap NodeCapability) ([]T, error) {
+func UnmarshalNodeCapViewJSON[T any](cm views.MapSlice[nodecap.Cap, RawMessage], cap nodecap.Cap) ([]T, error) {
 	vals, ok := cm.GetOk(cap)
 	if !ok {
 		return nil, nil
@@ -1610,7 +1664,7 @@ func UnmarshalNodeCapViewJSON[T any](cm views.MapSlice[NodeCapability, RawMessag
 // Contains reports whether c has the capability cap. This is used to test for
 // the existence of a capability, especially when the capability has no
 // associated argument/data values.
-func (c NodeCapMap) Contains(cap NodeCapability) bool {
+func (c NodeCapMap) Contains(cap nodecap.Cap) bool {
 	_, ok := c[cap]
 	return ok
 }
@@ -1621,19 +1675,19 @@ func (c NodeCapMap) Contains(cap NodeCapability) bool {
 //
 // The values are opaque to Tailscale, but are passed through from the ACLs to
 // the application via the WhoIs API.
-type PeerCapMap map[PeerCapability][]RawMessage
+type PeerCapMap map[peercap.Cap][]RawMessage
 
 // UnmarshalCapJSON unmarshals each JSON value in cm[cap] as T.
 // If cap does not exist in cm, it returns (nil, nil).
 // It returns an error if the values cannot be unmarshaled into the provided type.
-func UnmarshalCapJSON[T any](cm PeerCapMap, cap PeerCapability) ([]T, error) {
+func UnmarshalCapJSON[T any](cm PeerCapMap, cap peercap.Cap) ([]T, error) {
 	return UnmarshalCapViewJSON[T](views.MapSliceOf(cm), cap)
 }
 
 // UnmarshalCapViewJSON unmarshals each JSON value in cm.Get(cap) as T.
 // If cap does not exist in cm, it returns (nil, nil).
 // It returns an error if the values cannot be unmarshaled into the provided type.
-func UnmarshalCapViewJSON[T any](cm views.MapSlice[PeerCapability, RawMessage], cap PeerCapability) ([]T, error) {
+func UnmarshalCapViewJSON[T any](cm views.MapSlice[peercap.Cap, RawMessage], cap peercap.Cap) ([]T, error) {
 	vals, ok := cm.GetOk(cap)
 	if !ok {
 		return nil, nil
@@ -1652,7 +1706,7 @@ func UnmarshalCapViewJSON[T any](cm views.MapSlice[PeerCapability, RawMessage], 
 // HasCapability reports whether c has the capability cap. This is used to test
 // for the existence of a capability, especially when the capability has no
 // associated argument/data values.
-func (c PeerCapMap) HasCapability(cap PeerCapability) bool {
+func (c PeerCapMap) HasCapability(cap peercap.Cap) bool {
 	_, ok := c[cap]
 	return ok
 }
@@ -1911,7 +1965,7 @@ type PingResponse struct {
 
 	// DERPRegionID is non-zero DERP region ID if DERP was used.
 	// It is not currently set for TSMP pings.
-	DERPRegionID int `json:",omitempty"`
+	DERPRegionID DERPRegionID `json:",omitempty"`
 
 	// DERPRegionCode is the three-letter region code
 	// corresponding to DERPRegionID.
@@ -2082,7 +2136,7 @@ type MapResponse struct {
 	PacketFilters map[string][]FilterRule `json:",omitempty"`
 
 	// UserProfiles are the user profiles of nodes in the network.
-	// As as of 1.1.541 (mapver 5), this contains new or updated
+	// As of 1.1.541 (mapver 5), this contains new or updated
 	// user profiles only.
 	UserProfiles []UserProfile `json:",omitempty"`
 
@@ -2257,7 +2311,7 @@ type ClientVersion struct {
 
 	// UrgentSecurityUpdate is set when the client is missing an important
 	// security update. That update may be in LatestVersion or earlier.
-	// UrgentSecurityUpdate should not be set if RunningLatest is false.
+	// UrgentSecurityUpdate should not be set if RunningLatest is true.
 	UrgentSecurityUpdate bool `json:",omitempty"`
 
 	// Notify is whether the client should do an OS-specific notification about
@@ -2379,7 +2433,8 @@ func (n *Node) Equal(n2 *Node) bool {
 		eqPtr(n.SelfNodeV4MasqAddrForThisPeer, n2.SelfNodeV4MasqAddrForThisPeer) &&
 		eqPtr(n.SelfNodeV6MasqAddrForThisPeer, n2.SelfNodeV6MasqAddrForThisPeer) &&
 		n.IsWireGuardOnly == n2.IsWireGuardOnly &&
-		n.IsJailed == n2.IsJailed
+		n.IsJailed == n2.IsJailed &&
+		n.StableTailnetID == n2.StableTailnetID
 }
 
 func eqPtr[T comparable](a, b *T) bool {
@@ -2418,320 +2473,114 @@ type Oauth2Token struct {
 	// If zero, TokenSource implementations will reuse the same
 	// token forever and RefreshToken or equivalent
 	// mechanisms for that TokenSource will not be used.
-	Expiry time.Time `json:"expiry,omitempty"`
+	Expiry time.Time `json:"expiry,omitzero"`
 }
 
-// NodeCapability represents a capability granted to the self node as listed in
-// MapResponse.Node.Capabilities.
+// NodeCapability is a type alias to [nodecap.Cap]
+// and node capabilities are now defined in the [nodecap] package,
+// see [CapabilityFileSharing] and [NodeAttrDisableAndroidBindToActiveNetwork] respectively.
 //
-// It must be a URL like "https://tailscale.com/cap/file-sharing", or a
-// well-known capability name like "funnel". The latter is only allowed for
-// Tailscale-defined capabilities.
-//
-// Unlike PeerCapability, NodeCapability is not in context of a peer and is
-// granted to the node itself.
-//
-// These are also referred to as "Node Attributes" in the ACL policy file.
-type NodeCapability string
+//go:fix inline
+type NodeCapability = nodecap.Cap
 
+// NodeCapabilityPrefix is a type alias to [nodecap.Prefix]
+// and these prefixes are now defined in the [nodecap] package,
+// see [NodeAttrPrefixServices].
+//
+//go:fix inline
+type NodeCapabilityPrefix = nodecap.Prefix
+
+// Deprecated: Capabilities and NodeAttrs are now defined in the nodecap package, see [nodecap.Cap].
+// These constants are provided for backwards compatibility
+// but no new [NodeCapability] aliases will be added to this list.
+//
+//go:fix inline
 const (
-	CapabilityFileSharing        NodeCapability = "https://tailscale.com/cap/file-sharing"
-	CapabilityAdmin              NodeCapability = "https://tailscale.com/cap/is-admin"
-	CapabilityOwner              NodeCapability = "https://tailscale.com/cap/is-owner"
-	CapabilitySSH                NodeCapability = "https://tailscale.com/cap/ssh"                   // feature enabled/available
-	CapabilitySSHRuleIn          NodeCapability = "https://tailscale.com/cap/ssh-rule-in"           // some SSH rule reach this node
-	CapabilityDataPlaneAuditLogs NodeCapability = "https://tailscale.com/cap/data-plane-audit-logs" // feature enabled
-	CapabilityDebug              NodeCapability = "https://tailscale.com/cap/debug"                 // exposes debug endpoints over the PeerAPI
-	CapabilityHTTPS              NodeCapability = "https"
+	CapabilityFileSharing                                = nodecap.FileSharing
+	CapabilityAdmin                                      = nodecap.Admin
+	CapabilityOwner                                      = nodecap.Owner
+	CapabilitySSH                                        = nodecap.SSH
+	CapabilitySSHRuleIn                                  = nodecap.SSHRuleIn
+	CapabilityDataPlaneAuditLogs                         = nodecap.DataPlaneAuditLogs
+	CapabilityDebug                                      = nodecap.Debug
+	CapabilityHTTPS                                      = nodecap.HTTPS
+	CapabilityMacUIV2                                    = nodecap.MacUIV2
+	CapabilityServicesInDesktopClients                   = nodecap.ServicesInDesktopClients
+	CapabilityBindToInterfaceByRoute                     = nodecap.BindToInterfaceByRoute
+	CapabilityDebugDisableAlternateDefaultRouteInterface = nodecap.DebugDisableAlternateDefaultRouteInterface
+	CapabilityDebugDisableBindConnToInterface            = nodecap.DebugDisableBindConnToInterface
+	CapabilityDebugDisableBindConnToInterfaceAppleExt    = nodecap.DebugDisableBindConnToInterfaceAppleExt
+	CapabilityTailnetLock                                = nodecap.TailnetLock
+	CapabilityWarnFunnelNoInvite                         = nodecap.WarnFunnelNoInvite
+	CapabilityWarnFunnelNoHTTPS                          = nodecap.WarnFunnelNoHTTPS
+	CapabilityDebugTSDNSResolution                       = nodecap.DebugTSDNSResolution
+	CapabilityFunnelPorts                                = nodecap.FunnelPorts
+	// Deprecated: Do not add any further values here, use [nodecap] instead.
 
-	// CapabilityMacUIV2 makes the macOS GUI enable its v2 mode.
-	CapabilityMacUIV2 NodeCapability = "https://tailscale.com/cap/mac-ui-v2"
+	NodeAttrDisableAndroidBindToActiveNetwork    = nodecap.DisableAndroidBindToActiveNetwork
+	NodeAttrOnlyTCP443                           = nodecap.OnlyTCP443
+	NodeAttrFunnel                               = nodecap.Funnel
+	NodeAttrSSHAggregator                        = nodecap.SSHAggregator
+	NodeAttrDebugForceBackgroundSTUN             = nodecap.DebugForceBackgroundSTUN
+	NodeAttrDebugDisableWGTrim                   = nodecap.DebugDisableWGTrim
+	NodeAttrDisableSubnetsIfPAC                  = nodecap.DisableSubnetsIfPAC
+	NodeAttrDisableUPnP                          = nodecap.DisableUPnP
+	NodeAttrDisableDeltaUpdates                  = nodecap.DisableDeltaUpdates
+	NodeAttrRandomizeClientPort                  = nodecap.RandomizeClientPort
+	NodeAttrSilentDisco                          = nodecap.SilentDisco
+	NodeAttrOneCGNATEnable                       = nodecap.OneCGNATEnable
+	NodeAttrOneCGNATDisable                      = nodecap.OneCGNATDisable
+	NodeAttrPeerMTUEnable                        = nodecap.PeerMTUEnable
+	NodeAttrDNSForwarderDisableTCPRetries        = nodecap.DNSForwarderDisableTCPRetries
+	NodeAttrLinuxMustUseIPTables                 = nodecap.LinuxMustUseIPTables
+	NodeAttrLinuxMustUseNfTables                 = nodecap.LinuxMustUseNfTables
+	NodeAttrProbeUDPLifetime                     = nodecap.ProbeUDPLifetime
+	NodeAttrsTaildriveShare                      = nodecap.TaildriveShare
+	NodeAttrsTaildriveAccess                     = nodecap.TaildriveAccess
+	NodeAttrSuggestExitNode                      = nodecap.SuggestExitNode
+	NodeAttrDisableWebClient                     = nodecap.DisableWebClient
+	NodeAttrLogExitFlows                         = nodecap.LogExitFlows
+	NodeAttrAutoExitNode                         = nodecap.AutoExitNode
+	NodeAttrStoreAppCRoutes                      = nodecap.StoreAppCRoutes
+	NodeAttrSuggestExitNodeUI                    = nodecap.SuggestExitNodeUI
+	NodeAttrUserDialUseRoutes                    = nodecap.UserDialUseRoutes
+	NodeAttrSSHBehaviorV1                        = nodecap.SSHBehaviorV1
+	NodeAttrSSHBehaviorV2                        = nodecap.SSHBehaviorV2
+	NodeAttrDisableSplitDNSWhenNoCustomResolvers = nodecap.DisableSplitDNSWhenNoCustomResolvers
+	NodeAttrScopeQuad100OnMacOS                  = nodecap.ScopeQuad100OnMacOS
+	NodeAttrDisableLocalDNSOverrideViaNRPT       = nodecap.DisableLocalDNSOverrideViaNRPT
+	NodeAttrDisableMagicSockCryptoRouting        = nodecap.DisableMagicSockCryptoRouting
+	NodeAttrDisableCaptivePortalDetection        = nodecap.DisableCaptivePortalDetection
+	NodeAttrDisableSkipStatusQueue               = nodecap.DisableSkipStatusQueue
+	NodeAttrSSHEnvironmentVariables              = nodecap.SSHEnvironmentVariables
+	NodeAttrServiceHost                          = nodecap.ServiceHost
+	NodeAttrMaxKeyDuration                       = nodecap.MaxKeyDuration
+	NodeAttrNativeIPV4                           = nodecap.NativeIPV4
+	NodeAttrDisableRelayServer                   = nodecap.DisableRelayServer
+	NodeAttrDisableRelayClient                   = nodecap.DisableRelayClient
+	NodeAttrMagicDNSPeerAAAA                     = nodecap.MagicDNSPeerAAAA
+	NodeAttrDNSSubdomainResolve                  = nodecap.DNSSubdomainResolve
+	NodeAttrTrafficSteering                      = nodecap.TrafficSteering
+	NodeAttrTailnetDisplayName                   = nodecap.TailnetDisplayName
+	NodeAttrClientSideReachability               = nodecap.ClientSideReachability
+	NodeAttrClientSideReachabilityRouteCheck     = nodecap.ClientSideReachabilityRouteCheck
+	NodeAttrDefaultAutoUpdate                    = nodecap.DefaultAutoUpdate
+	NodeAttrDisableHostsFileUpdates              = nodecap.DisableHostsFileUpdates
+	NodeAttrForceRegisterMagicDNSIPv4Only        = nodecap.ForceRegisterMagicDNSIPv4Only
+	NodeAttrCacheNetworkMaps                     = nodecap.CacheNetworkMaps
+	NodeAttrDisableCacheNetworkMaps              = nodecap.DisableCacheNetworkMaps
+	NodeAttrDisableLinuxCGNATDropRule            = nodecap.DisableLinuxCGNATDropRule
+	NodeAttrEmitRuntimeMetrics                   = nodecap.EmitRuntimeMetrics
+	NodeAttrDisableUDPGRO                        = nodecap.DisableUDPGRO
+	NodeAttrDisableUDPGSO                        = nodecap.DisableUDPGSO
+	NodeAttrDisableTUNUDPGRO                     = nodecap.DisableTUNUDPGRO
+	NodeAttrDisableTUNTCPGRO                     = nodecap.DisableTUNTCPGRO
+	NodeAttrNeverGSOEqualTail                    = nodecap.NeverGSOEqualTail
+	NodeAttrConnReject                           = nodecap.ConnReject
+	// Deprecated: Do not add any further values here, use [nodecap] instead.
 
-	// CapabilityBindToInterfaceByRoute changes how Darwin nodes create
-	// sockets (in the net/netns package). See that package for more
-	// details on the behaviour of this capability.
-	CapabilityBindToInterfaceByRoute NodeCapability = "https://tailscale.com/cap/bind-to-interface-by-route"
-
-	// CapabilityDebugDisableAlternateDefaultRouteInterface changes how Darwin
-	// nodes get the default interface. There is an optional hook (used by the
-	// macOS and iOS clients) to override the default interface, this capability
-	// disables that and uses the default behavior (of parsing the routing
-	// table).
-	CapabilityDebugDisableAlternateDefaultRouteInterface NodeCapability = "https://tailscale.com/cap/debug-disable-alternate-default-route-interface"
-
-	// CapabilityDebugDisableBindConnToInterface disables the automatic binding
-	// of connections to the default network interface on Darwin nodes.
-	CapabilityDebugDisableBindConnToInterface NodeCapability = "https://tailscale.com/cap/debug-disable-bind-conn-to-interface"
-
-	// CapabilityDebugDisableBindConnToInterface disables the automatic binding
-	// of connections to the default network interface on Darwin nodes using network extensions
-	CapabilityDebugDisableBindConnToInterfaceAppleExt NodeCapability = "https://tailscale.com/cap/debug-disable-bind-conn-to-interface-apple-ext"
-
-	// CapabilityTailnetLock indicates the node may initialize tailnet lock.
-	CapabilityTailnetLock NodeCapability = "https://tailscale.com/cap/tailnet-lock"
-
-	// Funnel warning capabilities used for reporting errors to the user.
-
-	// CapabilityWarnFunnelNoInvite indicates whether Funnel is enabled for the tailnet.
-	// This cap is no longer used 2023-08-09 onwards.
-	CapabilityWarnFunnelNoInvite NodeCapability = "https://tailscale.com/cap/warn-funnel-no-invite"
-
-	// CapabilityWarnFunnelNoHTTPS indicates HTTPS has not been enabled for the tailnet.
-	// This cap is no longer used 2023-08-09 onwards.
-	CapabilityWarnFunnelNoHTTPS NodeCapability = "https://tailscale.com/cap/warn-funnel-no-https"
-
-	// Debug logging capabilities
-
-	// CapabilityDebugTSDNSResolution enables verbose debug logging for DNS
-	// resolution for Tailscale-controlled domains (the control server, log
-	// server, DERP servers, etc.)
-	CapabilityDebugTSDNSResolution NodeCapability = "https://tailscale.com/cap/debug-ts-dns-resolution"
-
-	// CapabilityFunnelPorts specifies the ports that the Funnel is available on.
-	// The ports are specified as a comma-separated list of port numbers or port
-	// ranges (e.g. "80,443,8080-8090") in the ports query parameter.
-	// e.g. https://tailscale.com/cap/funnel-ports?ports=80,443,8080-8090
-	CapabilityFunnelPorts NodeCapability = "https://tailscale.com/cap/funnel-ports"
-
-	// NodeAttrOnlyTCP443 specifies that the client should not attempt to generate
-	// any outbound traffic that isn't TCP on port 443 (HTTPS). This is used for
-	// clients in restricted environments where only HTTPS traffic is allowed
-	// other types of traffic trips outbound firewall alarms. This thus implies
-	// all traffic is over DERP.
-	NodeAttrOnlyTCP443 NodeCapability = "only-tcp-443"
-
-	// NodeAttrFunnel grants the ability for a node to host ingress traffic.
-	NodeAttrFunnel NodeCapability = "funnel"
-	// NodeAttrSSHAggregator grants the ability for a node to collect SSH sessions.
-	NodeAttrSSHAggregator NodeCapability = "ssh-aggregator"
-
-	// NodeAttrDebugForceBackgroundSTUN forces a node to always do background
-	// STUN queries regardless of inactivity.
-	NodeAttrDebugForceBackgroundSTUN NodeCapability = "debug-always-stun"
-
-	// NodeAttrDebugDisableWGTrim disables the lazy WireGuard configuration,
-	// always giving WireGuard the full netmap, even for idle peers.
-	NodeAttrDebugDisableWGTrim NodeCapability = "debug-no-wg-trim"
-
-	// NodeAttrDisableSubnetsIfPAC controls whether subnet routers should be
-	// disabled if WPAD is present on the network.
-	NodeAttrDisableSubnetsIfPAC NodeCapability = "debug-disable-subnets-if-pac"
-
-	// NodeAttrDisableUPnP makes the client not perform a UPnP portmapping.
-	// By default, we want to enable it to see if it works on more clients.
-	//
-	// If UPnP catastrophically fails for people, this should be set kill
-	// new attempts at UPnP connections.
-	NodeAttrDisableUPnP NodeCapability = "debug-disable-upnp"
-
-	// NodeAttrDisableDeltaUpdates makes the client not process updates via the
-	// delta update mechanism and should instead treat all netmap changes as
-	// "full" ones as tailscaled did in 1.48.x and earlier.
-	NodeAttrDisableDeltaUpdates NodeCapability = "disable-delta-updates"
-
-	// NodeAttrRandomizeClientPort makes magicsock UDP bind to
-	// :0 to get a random local port, ignoring any configured
-	// fixed port.
-	NodeAttrRandomizeClientPort NodeCapability = "randomize-client-port"
-
-	// NodeAttrSilentDisco makes the client suppress disco heartbeats to its
-	// peers.
-	NodeAttrSilentDisco NodeCapability = "silent-disco"
-
-	// NodeAttrOneCGNATEnable makes the client prefer one big CGNAT /10 route
-	// rather than a /32 per peer. At most one of this or
-	// NodeAttrOneCGNATDisable may be set; if neither are, it's automatic.
-	NodeAttrOneCGNATEnable NodeCapability = "one-cgnat?v=true"
-
-	// NodeAttrOneCGNATDisable makes the client prefer a /32 route per peer
-	// rather than one big /10 CGNAT route. At most one of this or
-	// NodeAttrOneCGNATEnable may be set; if neither are, it's automatic.
-	NodeAttrOneCGNATDisable NodeCapability = "one-cgnat?v=false"
-
-	// NodeAttrPeerMTUEnable makes the client do path MTU discovery to its
-	// peers. If it isn't set, it defaults to the client default.
-	NodeAttrPeerMTUEnable NodeCapability = "peer-mtu-enable"
-
-	// NodeAttrDNSForwarderDisableTCPRetries disables retrying truncated
-	// DNS queries over TCP if the response is truncated.
-	NodeAttrDNSForwarderDisableTCPRetries NodeCapability = "dns-forwarder-disable-tcp-retries"
-
-	// NodeAttrLinuxMustUseIPTables forces Linux clients to use iptables for
-	// netfilter management.
-	// This cannot be set simultaneously with NodeAttrLinuxMustUseNfTables.
-	NodeAttrLinuxMustUseIPTables NodeCapability = "linux-netfilter?v=iptables"
-
-	// NodeAttrLinuxMustUseNfTables forces Linux clients to use nftables for
-	// netfilter management.
-	// This cannot be set simultaneously with NodeAttrLinuxMustUseIPTables.
-	NodeAttrLinuxMustUseNfTables NodeCapability = "linux-netfilter?v=nftables"
-
-	// NodeAttrDisableSeamlessKeyRenewal disables seamless key renewal, which is
-	// enabled by default in clients as of 2025-09-17 (1.90 and later).
-	//
-	// We will use this attribute to manage the rollout, and disable seamless in
-	// clients with known bugs.
-	// http://go/seamless-key-renewal
-	NodeAttrDisableSeamlessKeyRenewal NodeCapability = "disable-seamless-key-renewal"
-
-	// NodeAttrSeamlessKeyRenewal was used to opt-in to seamless key renewal
-	// during its private alpha.
-	//
-	// Deprecated: NodeAttrSeamlessKeyRenewal is deprecated as of CapabilityVersion 126,
-	// because seamless key renewal is now enabled by default.
-	NodeAttrSeamlessKeyRenewal NodeCapability = "seamless-key-renewal"
-
-	// NodeAttrProbeUDPLifetime makes the client probe UDP path lifetime at the
-	// tail end of an active direct connection in magicsock.
-	NodeAttrProbeUDPLifetime NodeCapability = "probe-udp-lifetime"
-
-	// NodeAttrsTaildriveShare enables sharing via Taildrive.
-	NodeAttrsTaildriveShare NodeCapability = "drive:share"
-
-	// NodeAttrsTaildriveAccess enables accessing shares via Taildrive.
-	NodeAttrsTaildriveAccess NodeCapability = "drive:access"
-
-	// NodeAttrSuggestExitNode is applied to each exit node which the control plane has determined
-	// is a recommended exit node.
-	NodeAttrSuggestExitNode NodeCapability = "suggest-exit-node"
-
-	// NodeAttrDisableWebClient disables using the web client.
-	NodeAttrDisableWebClient NodeCapability = "disable-web-client"
-
-	// NodeAttrLogExitFlows enables exit node destinations in network flow logs.
-	NodeAttrLogExitFlows NodeCapability = "log-exit-flows"
-
-	// NodeAttrAutoExitNode permits the automatic exit nodes feature.
-	NodeAttrAutoExitNode NodeCapability = "auto-exit-node"
-
-	// NodeAttrStoreAppCRoutes configures the node to store app connector routes persistently.
-	NodeAttrStoreAppCRoutes NodeCapability = "store-appc-routes"
-
-	// NodeAttrSuggestExitNodeUI allows the currently suggested exit node to appear in the client GUI.
-	NodeAttrSuggestExitNodeUI NodeCapability = "suggest-exit-node-ui"
-
-	// NodeAttrUserDialUseRoutes makes UserDial use either the peer dialer or the system dialer,
-	// depending on the destination address and the configured routes. When present, it also makes
-	// the DNS forwarder use UserDial instead of SystemDial when dialing resolvers.
-	NodeAttrUserDialUseRoutes NodeCapability = "user-dial-routes"
-
-	// NodeAttrSSHBehaviorV1 forces SSH to use the V1 behavior (no su, run SFTP in-process)
-	// Added 2024-05-29 in Tailscale version 1.68.
-	NodeAttrSSHBehaviorV1 NodeCapability = "ssh-behavior-v1"
-
-	// NodeAttrSSHBehaviorV2 forces SSH to use the V2 behavior (use su, run SFTP in child process).
-	// This overrides NodeAttrSSHBehaviorV1 if set.
-	// See forceV1Behavior in ssh/tailssh/incubator.go for distinction between
-	// V1 and V2 behavior.
-	// Added 2024-08-06 in Tailscale version 1.72.
-	NodeAttrSSHBehaviorV2 NodeCapability = "ssh-behavior-v2"
-
-	// NodeAttrDisableSplitDNSWhenNoCustomResolvers indicates that the node's
-	// DNS manager should not adopt a split DNS configuration even though the
-	// Config of the resolver only contains routes that do not specify custom
-	// resolver(s), hence all DNS queries can be safely sent to the upstream
-	// DNS resolver and the node's DNS forwarder doesn't need to handle all
-	// DNS traffic.
-	// This is for now (2024-06-06) an iOS-specific battery life optimization,
-	// and this node attribute allows us to disable the optimization remotely
-	// if needed.
-	NodeAttrDisableSplitDNSWhenNoCustomResolvers NodeCapability = "disable-split-dns-when-no-custom-resolvers"
-
-	// NodeAttrDisableLocalDNSOverrideViaNRPT indicates that the node's DNS manager should not
-	// create a default (catch-all) Windows NRPT rule when "Override local DNS" is enabled.
-	// Without this rule, Windows 8.1 and newer devices issue parallel DNS requests to DNS servers
-	// associated with all network adapters, even when "Override local DNS" is enabled and/or
-	// a Mullvad exit node is being used, resulting in DNS leaks.
-	// We began creating this rule on 2024-06-14, and this node attribute
-	// allows us to disable the new behavior remotely if needed.
-	NodeAttrDisableLocalDNSOverrideViaNRPT NodeCapability = "disable-local-dns-override-via-nrpt"
-
-	// NodeAttrDisableMagicSockCryptoRouting disables the use of the
-	// magicsock cryptorouting hook. See tailscale/corp#20732.
-	//
-	// Deprecated: NodeAttrDisableMagicSockCryptoRouting is deprecated as of
-	// CapabilityVersion 124, CryptoRouting is now mandatory. See tailscale/corp#31083.
-	NodeAttrDisableMagicSockCryptoRouting NodeCapability = "disable-magicsock-crypto-routing"
-
-	// NodeAttrDisableCaptivePortalDetection instructs the client to not perform captive portal detection
-	// automatically when the network state changes.
-	NodeAttrDisableCaptivePortalDetection NodeCapability = "disable-captive-portal-detection"
-
-	// NodeAttrDisableSkipStatusQueue is set when the node should disable skipping
-	// of queued netmap.NetworkMap between the controlclient and LocalBackend.
-	// See tailscale/tailscale#14768.
-	NodeAttrDisableSkipStatusQueue NodeCapability = "disable-skip-status-queue"
-
-	// NodeAttrSSHEnvironmentVariables enables logic for handling environment variables sent
-	// via SendEnv in the SSH server and applying them to the SSH session.
-	NodeAttrSSHEnvironmentVariables NodeCapability = "ssh-env-vars"
-
-	// NodeAttrServiceHost indicates the VIP Services for which the client is
-	// approved to act as a service host, and which IP addresses are assigned
-	// to those VIP Services. Any VIP Services that the client is not
-	// advertising can be ignored.
-	// Each value of this key in [NodeCapMap] is of type [ServiceIPMappings].
-	// If multiple values of this key exist, they should be merged in sequence
-	// (replace conflicting keys).
-	NodeAttrServiceHost NodeCapability = "service-host"
-
-	// NodeAttrMaxKeyDuration represents the MaxKeyDuration setting on the
-	// tailnet. The value of this key in [NodeCapMap] will be only one entry of
-	// type float64 representing the duration in seconds. This cap will be
-	// omitted if the tailnet's MaxKeyDuration is the default.
-	NodeAttrMaxKeyDuration NodeCapability = "tailnet.maxKeyDuration"
-
-	// NodeAttrNativeIPV4 contains the IPV4 address of the node in its
-	// native tailnet. This is currently only sent to Hello, in its
-	// peer node list.
-	NodeAttrNativeIPV4 NodeCapability = "native-ipv4"
-
-	// NodeAttrDisableRelayServer prevents the node from acting as an underlay
-	// UDP relay server. There are no expected values for this key; the key
-	// only needs to be present in [NodeCapMap] to take effect.
-	NodeAttrDisableRelayServer NodeCapability = "disable-relay-server"
-
-	// NodeAttrDisableRelayClient prevents the node from both allocating UDP
-	// relay server endpoints itself, and from using endpoints allocated by
-	// its peers. This attribute can be added to the node dynamically; if added
-	// while the node is already running, the node will be unable to allocate
-	// endpoints after it next updates its network map, and will be immediately
-	// unable to use new paths via a UDP relay server. Setting this attribute
-	// dynamically does not remove any existing paths, including paths that
-	// traverse a UDP relay server. There are no expected values for this key
-	// in [NodeCapMap]; the key only needs to be present in [NodeCapMap] to
-	// take effect.
-	NodeAttrDisableRelayClient NodeCapability = "disable-relay-client"
-
-	// NodeAttrMagicDNSPeerAAAA is a capability that tells the node's MagicDNS
-	// server to answer AAAA queries about its peers. See tailscale/tailscale#1152.
-	NodeAttrMagicDNSPeerAAAA NodeCapability = "magicdns-aaaa"
-
-	// NodeAttrTrafficSteering configures the node to use the traffic
-	// steering subsystem for via routes. See tailscale/corp#29966.
-	NodeAttrTrafficSteering NodeCapability = "traffic-steering"
-
-	// NodeAttrTailnetDisplayName is an optional alternate name for the tailnet
-	// to be displayed to the user.
-	// If empty or absent, a default is used.
-	// If this value is present and set by a user this will only include letters,
-	// numbers, apostrophe, spaces, and hyphens. This may not be true for the default.
-	// Values can look like "foo.com" or "Foo's Test Tailnet - Staging".
-	NodeAttrTailnetDisplayName NodeCapability = "tailnet-display-name"
-
-	// NodeAttrClientSideReachability configures the node to determine
-	// reachability itself when choosing connectors. When absent, the
-	// default behavior is to trust the control plane when it claims that a
-	// node is no longer online, but that is not a reliable signal.
-	NodeAttrClientSideReachability = "client-side-reachability"
-
-	// NodeAttrDefaultAutoUpdate advertises the default node auto-update setting
-	// for this tailnet. The node is free to opt-in or out locally regardless of
-	// this value. Once this has been set and stored in the client, future
-	// changes from the control plane are ignored.
-	//
-	// The value of the key in [NodeCapMap] is a JSON boolean.
-	NodeAttrDefaultAutoUpdate NodeCapability = "default-auto-update"
+	NodeAttrPrefixServices = nodecap.ServicesPrefix
+	// Deprecated: Do not add any further values here, use [nodecap] instead.
 )
 
 // SetDNSRequest is a request to add a DNS record.
@@ -2922,7 +2771,12 @@ type SSHAction struct {
 
 	// SessionDuration, if non-zero, is how long the session can stay open
 	// before being forcefully terminated.
-	SessionDuration time.Duration `json:"sessionDuration,omitempty,format:nano"`
+	// It is encoded as an int64 of nanoseconds (Go's time.Duration
+	// wire format for encoding/json v1). It must not use a jsonv2
+	// format tag; the mere presence of one makes Go 1.27's
+	// encoding/json fail to decode the struct. See
+	// https://github.com/tailscale/tailscale/issues/20528.
+	SessionDuration time.Duration `json:"sessionDuration,omitempty"`
 
 	// AllowAgentForwarding, if true, allows accepted connections to forward
 	// the ssh agent if requested.
@@ -3183,7 +3037,7 @@ type PeerChange struct {
 
 	// DERPRegion, if non-zero, means that NodeID's home DERP
 	// region ID is now this number.
-	DERPRegion int `json:",omitzero"`
+	DERPRegion DERPRegionID `json:",omitzero"`
 
 	// Cap, if non-zero, means that NodeID's capability version has changed.
 	Cap CapabilityVersion `json:",omitzero"`
@@ -3271,6 +3125,200 @@ const LBHeader = "Ts-Lb"
 // correspond to those IPs. Any services that don't correspond to a service
 // this client is hosting can be ignored.
 type ServiceIPMappings map[ServiceName][]netip.Addr
+
+// ServiceActionType represents the type of a [ServiceAction]. Clients use
+// this value to determine which protocol or application to use when
+// handling the action.
+//
+// Well-known Tailscale types are defined as constants in this package.
+// They are plain slugs (e.g. "ssh", "http") with no URL prefix.
+//
+// When a type corresponds to an application layer protocol with a
+// well-known port, the slug generally follows the IANA Service Name and
+// Transport Protocol Port Number Registry:
+// https://www.iana.org/assignments/service-names-port-numbers.
+//
+// In cases where the IANA service name differs from the commonly used
+// protocol name, the protocol name is preferred for readability and
+// interoperability (e.g. RDP is registered as "ms-wbt-server").
+//
+// If third-party types are introduced in the future, they must use URL
+// form (e.g. "example.com/my-custom-type") to avoid collisions with
+// first-party types.
+type ServiceActionType string
+
+const (
+	// ServiceActionTypeAWSS3 indicates that a port corresponds to an
+	// AWS S3 compatible endpoint and the AWS configuration may be modified
+	// to point to this endpoint and S3 clients may be used.
+	ServiceActionTypeAWSS3 ServiceActionType = "aws-s3"
+
+	// ServiceActionTypeCockroachDB indicates that a port corresponds to a
+	// CockroachDB server and CockroachDB clients may be used.
+	ServiceActionTypeCockroachDB ServiceActionType = "cockroach"
+
+	// ServiceActionTypeElasticSearch indicates that a port corresponds to
+	// an Elasticsearch server and Elasticsearch clients may be used.
+	ServiceActionTypeElasticSearch ServiceActionType = "elasticsearch"
+
+	// ServiceActionTypeHTTP indicates that a port corresponds to an HTTP
+	// server and HTTP clients may be used.
+	ServiceActionTypeHTTP ServiceActionType = "http"
+
+	// ServiceActionTypeKubernetes indicates that a port corresponds to a
+	// Kubernetes API server and the Kubernetes context may be configured to
+	// point to the service and Kubernetes clients may be used.
+	ServiceActionTypeKubernetes ServiceActionType = "kubernetes"
+
+	// ServiceActionTypeMongoDB indicates that a port corresponds to a MongoDB
+	// server and MongoDB clients may be used.
+	ServiceActionTypeMongoDB ServiceActionType = "mongodb"
+
+	// ServiceActionTypeMSSQL indicates that a port corresponds to a Microsoft
+	// SQL Server and MSSQL clients may be used. The IANA registry uses
+	// "ms-sql-s" but "mssql" is the widely recognized name.
+	ServiceActionTypeMSSQL ServiceActionType = "mssql"
+
+	// ServiceActionTypeMySQL indicates that a port corresponds to a MySQL
+	// server and MySQL clients may be used.
+	ServiceActionTypeMySQL ServiceActionType = "mysql"
+
+	// ServiceActionTypePostgreSQL indicates that a port corresponds to a
+	// PostgreSQL server and PostgreSQL clients may be used.
+	ServiceActionTypePostgreSQL ServiceActionType = "postgresql"
+
+	// ServiceActionTypeRDP indicates that a port corresponds to an RDP
+	// server and RDP clients may be used. The IANA registry uses
+	// "ms-wbt-server" but "rdp" is the widely recognized name.
+	ServiceActionTypeRDP ServiceActionType = "rdp"
+
+	// ServiceActionTypeVNC indicates that a port corresponds to a VNC
+	// server and VNC clients may be used. The IANA registry uses "rfb"
+	// (Remote Framebuffer) but "vnc" is the widely recognized name.
+	ServiceActionTypeVNC ServiceActionType = "vnc"
+
+	// ServiceActionTypeSSH indicates that a port corresponds to an SSH
+	// server and SSH clients may be used.
+	ServiceActionTypeSSH ServiceActionType = "ssh"
+
+	// ServiceActionTypeTCP indicates that a port corresponds to a generic
+	// TCP server and TCP clients may be used.
+	ServiceActionTypeTCP ServiceActionType = "tcp"
+)
+
+// Valid reports whether t is a recognized ServiceActionType.
+func (t ServiceActionType) Valid() bool {
+	switch t {
+	case ServiceActionTypeAWSS3,
+		ServiceActionTypeCockroachDB,
+		ServiceActionTypeElasticSearch,
+		ServiceActionTypeHTTP,
+		ServiceActionTypeKubernetes,
+		ServiceActionTypeMongoDB,
+		ServiceActionTypeMSSQL,
+		ServiceActionTypeMySQL,
+		ServiceActionTypePostgreSQL,
+		ServiceActionTypeRDP,
+		ServiceActionTypeVNC,
+		ServiceActionTypeSSH,
+		ServiceActionTypeTCP:
+		return true
+	}
+	return false
+}
+
+// ServiceActionAttribute represents an attribute key for a [ServiceAction].
+// A given attribute's applicability depends on the [ServiceAction.Type].
+//
+// Well-known Tailscale attributes are defined as constants in this package.
+// Values are [RawMessage] (raw JSON) whose schema depends on the attribute.
+//
+// Clients should ignore attributes they do not recognize.
+type ServiceActionAttribute string
+
+const (
+	// ServiceActionAttributeWebClientURL is a [ServiceActionAttribute]
+	// that indicates to clients that a browser based client for the
+	// action is available at the URL in the value.
+	//
+	// The value is a JSON string containing a URL with an http(s) scheme.
+	ServiceActionAttributeWebClientURL ServiceActionAttribute = "tailscale.com/cap/web-client-url"
+
+	// ServiceActionAttributeResourceName is a [ServiceActionAttribute]
+	// that indicates to clients that the resource specified by the value
+	// should be selected when opening the application corresponding to
+	// the [ServiceAction.Type].
+	//
+	// This is particularly relevant for PostgreSQL services, where a
+	// database must be specified while opening a connection.
+	//
+	// The value is a JSON string containing the resource name
+	// (e.g. a database name).
+	ServiceActionAttributeResourceName ServiceActionAttribute = "tailscale.com/cap/resource-name"
+
+	// ServiceActionAttributeSkipUsername is a [ServiceActionAttribute]
+	// that indicates to clients that a username is not required.
+	//
+	// This attribute is typically used for services that are backed by
+	// an application-layer proxy. The proxy injects the appropriate
+	// credentials on behalf of the user, and any username provided by
+	// the user is ignored. This attribute informs clients that the
+	// username is irrelevant, and any username prompt should be skipped.
+	//
+	// The value is a JSON boolean.
+	ServiceActionAttributeSkipUsername ServiceActionAttribute = "tailscale.com/cap/skip-username"
+)
+
+// ServiceAction describes an action that a Tailscale
+// client can invoke for a [ServiceDetails].
+//
+// Clients should ignore actions with types they do not recognize.
+type ServiceAction struct {
+	// Type is the action's identifier i.e. a unique slug corresponding to a well
+	// known action. It drives icon selection and client application matching.
+	Type ServiceActionType
+
+	// Port is the target TCP port for this action. It must match one of
+	// the specific (non-range) TCP ports listed in the enclosing
+	// [ServiceDetails.Ports].
+	Port uint16
+
+	// DisplayName is an optional human-readable label which may be shown
+	// in client menus when there are multiple actions to select from.
+	// If empty, a display name may be inferred from the Type field.
+	DisplayName string `json:",omitzero"`
+
+	// Attributes is an optional key-value map carrying additional metadata
+	// to help clients drive UI or behavior related to this action.
+	Attributes map[ServiceActionAttribute]RawMessage `json:",omitzero"`
+}
+
+// ServiceDetails describes a Service visible to this node.
+// It is the value type stored under [NodeAttrPrefixServices]+serviceName keys in [NodeCapMap].
+type ServiceDetails struct {
+	// Name is the name of the Service, of the form "svc:dns-label".
+	Name ServiceName
+
+	// DisplayName is an optional human-readable label for the service.
+	// If empty, Name is used as a fallback by clients.
+	DisplayName string `json:",omitzero"`
+
+	// Addrs are the IP addresses (IPv4 and IPv6) assigned to this Service.
+	Addrs []netip.Addr `json:",omitempty"`
+
+	// Ports are the protocol/port combinations the Service accepts.
+	Ports []ProtoPortRange `json:",omitempty"`
+
+	// Actions is an optional list of actions describing how a client may
+	// interact with this service. Each action maps a [ServiceAction.Type] to a
+	// specific TCP port; the port must match one of the concrete (non-range)
+	// ports listed in Ports.
+	//
+	// Multiple actions may reference the same port. Not every port requires
+	// a corresponding action. When Actions has length zero, clients may infer
+	// default interactions from Ports.
+	Actions []ServiceAction `json:",omitzero"`
+}
 
 // ClientAuditAction represents an auditable action that a client can report to the
 // control plane.  These actions must correspond to the supported actions

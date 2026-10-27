@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 package key
@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/nacl/box"
 	"tailscale.com/types/structs"
+	"tailscale.com/util/bufiox"
 )
 
 const (
@@ -60,6 +61,14 @@ func NewNode() NodePrivate {
 	clamp25519Private(ret.k[:])
 	return ret
 }
+
+// Raw32 returns k as 32 raw bytes.
+func (k NodePrivate) Raw32() [32]byte { return k.k }
+
+// NodePrivateAs returns a NodePrivate as a named fixed-size array of bytes.
+// It's intended for interoperability with wireguard-go's
+// device.NoisePrivateKey type.
+func NodePrivateAs[T ~[32]byte](k NodePrivate) T { return k.k }
 
 // NodePrivateFromRaw32 parses a 32-byte raw value as a NodePrivate.
 //
@@ -147,6 +156,15 @@ func (k NodePrivate) OpenFrom(p NodePublic, ciphertext []byte) (cleartext []byte
 	return box.Open(nil, ciphertext[len(nonce):], nonce, &p.k, &k.k)
 }
 
+// UntypedHexString returns k, encoded as an untyped 64-character hex
+// string.
+//
+// Warning: this function is risky to use, because it produces
+// serialized values that do not identify themselves as a
+// NodePrivate, allowing other code to potentially parse it back in
+// as the wrong key type. For new uses that don't require backwards
+// compatibility with the untyped string format, please use
+// MarshalText/UnmarshalText.
 func (k NodePrivate) UntypedHexString() string {
 	return hex.EncodeToString(k.k[:])
 }
@@ -239,42 +257,34 @@ func (k NodePublic) AppendTo(buf []byte) []byte {
 }
 
 // ReadRawWithoutAllocating initializes k with bytes read from br.
-// The reading is done ~4x slower than io.ReadFull, but in exchange is
-// allocation-free.
+// It uses [bufiox.ReadFull] to read without heap allocations.
 func (k *NodePublic) ReadRawWithoutAllocating(br *bufio.Reader) error {
 	var z NodePublic
 	if *k != z {
 		return errors.New("refusing to read into non-zero NodePublic")
 	}
-	// This is ~4x slower than io.ReadFull, but using io.ReadFull
-	// causes one extra alloc, which is significant for the DERP
-	// server that consumes this method. So, process stuff slower but
-	// without allocation.
-	//
-	// Dear future: if io.ReadFull stops causing stuff to escape, you
-	// should switch back to that.
-	for i := range k.k {
-		b, err := br.ReadByte()
-		if err != nil {
-			return err
-		}
-		k.k[i] = b
-	}
-	return nil
+	_, err := bufiox.ReadFull(br, k.k[:])
+	return err
 }
 
-// WriteRawWithoutAllocating writes out k as 32 bytes to bw.
-// The writing is done ~3x slower than bw.Write, but in exchange is
-// allocation-free.
+// WriteRawWithoutAllocating writes out k as 32 big-endian bytes to bw.
+//
+// It uses AvailableBuffer to append directly into bufio's internal
+// buffer without allocation, falling back to WriteByte when the
+// buffer has insufficient space.
 func (k NodePublic) WriteRawWithoutAllocating(bw *bufio.Writer) error {
-	// Equivalent to bw.Write(k.k[:]), but without causing an
-	// escape-related alloc.
-	//
-	// Dear future: if bw.Write(k.k[:]) stops causing stuff to escape,
-	// you should switch back to that.
+	// Fast path: enough space in the buffer to append directly.
+	if bw.Available() >= len(k.k) {
+		buf := bw.AvailableBuffer()
+		buf = append(buf, k.k[:]...)
+		_, err := bw.Write(buf)
+		return err
+	}
+	// Slow path: buffer nearly full. Write byte-at-a-time to let
+	// bufio flush as needed, avoiding a heap allocation from append
+	// growing past AvailableBuffer's capacity.
 	for _, b := range k.k {
-		err := bw.WriteByte(b)
-		if err != nil {
+		if err := bw.WriteByte(b); err != nil {
 			return err
 		}
 	}
@@ -299,7 +309,7 @@ func (k NodePublic) Less(other NodePublic) bool {
 // UntypedHexString returns k, encoded as an untyped 64-character hex
 // string.
 //
-// Deprecated: this function is risky to use, because it produces
+// Warning: this function is risky to use, because it produces
 // serialized values that do not identify themselves as a
 // NodePublic, allowing other code to potentially parse it back in
 // as the wrong key type. For new uses that don't require backwards
