@@ -28,12 +28,12 @@ type FakeExperimentalV1alpha1 struct {
 	*testing.Fake
 }
 
-func (c *FakeExperimentalV1alpha1) XBackendTrafficPolicies(namespace string) v1alpha1.XBackendTrafficPolicyInterface {
-	return newFakeXBackendTrafficPolicies(c, namespace)
+func (c *FakeExperimentalV1alpha1) XBackends(namespace string) v1alpha1.XBackendInterface {
+	return newFakeXBackends(c, namespace)
 }
 
-func (c *FakeExperimentalV1alpha1) XListenerSets(namespace string) v1alpha1.XListenerSetInterface {
-	return newFakeXListenerSets(c, namespace)
+func (c *FakeExperimentalV1alpha1) XBackendTrafficPolicies(namespace string) v1alpha1.XBackendTrafficPolicyInterface {
+	return newFakeXBackendTrafficPolicies(c, namespace)
 }
 
 func (c *FakeExperimentalV1alpha1) XMeshes() v1alpha1.XMeshInterface {
