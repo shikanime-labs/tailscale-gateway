@@ -1,13 +1,13 @@
 module github.com/shikanime-studio/tailscale-gateway
 
-go 1.25.5
+go 1.26.0
 
 require (
 	github.com/brianvoe/gofakeit/v7 v7.6.0
 	github.com/go-logr/logr v1.4.3
 	github.com/spf13/viper v1.21.0
 	github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.24.0
 	k8s.io/api v0.35.0
 	k8s.io/apimachinery v0.35.0
 	k8s.io/client-go v0.35.0
