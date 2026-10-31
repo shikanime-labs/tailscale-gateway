@@ -196,8 +196,8 @@ github.com/spf13/viper/internal/features
 # github.com/subosito/gotenv v1.6.0
 ## explicit; go 1.18
 github.com/subosito/gotenv
-# github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
-## explicit; go 1.23
+# github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
+## explicit; go 1.26
 github.com/tailscale/hujson
 # github.com/x448/float16 v0.8.4
 ## explicit; go 1.11
