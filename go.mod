@@ -3,7 +3,7 @@ module github.com/shikanime-studio/tailscale-gateway
 go 1.27.3
 
 require (
-	github.com/brianvoe/gofakeit/v7 v7.6.0
+	github.com/brianvoe/gofakeit/v7 v7.18.1
 	github.com/go-logr/logr v1.4.4
 	github.com/spf13/viper v1.21.0
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
