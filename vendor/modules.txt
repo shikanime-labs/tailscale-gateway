@@ -986,6 +986,6 @@ tailscale.com/util/usermetric
 tailscale.com/util/vizerror
 tailscale.com/version
 tailscale.com/version/distro
-# tailscale.com/client/tailscale/v2 v2.10.1
+# tailscale.com/client/tailscale/v2 v2.12.0
 ## explicit; go 1.24.0
 tailscale.com/client/tailscale/v2
