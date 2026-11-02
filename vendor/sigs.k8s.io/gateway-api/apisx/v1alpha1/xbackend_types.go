@@ -1,0 +1,427 @@
+/*
+Copyright The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1alpha1
+
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	v1 "sigs.k8s.io/gateway-api/apis/v1"
+)
+
+// +genclient
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:storageversion
+// +kubebuilder:resource:categories=gateway-api,shortName=xbackend
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// XBackend is a Gateway API resource that represents a backend destination for
+// routing traffic. It serves as a Gateway-native way to define where and how a
+// Gateway should connect to a backend.
+//
+// Support: Extended
+type XBackend struct {
+	metav1.TypeMeta `json:",inline"`
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Spec defines the desired state of XBackend.
+	// +required
+	Spec BackendSpec `json:"spec"`
+
+	// Status defines the current state of XBackend.
+	// +optional
+	Status BackendStatus `json:"status,omitempty"`
+}
+
+// XBackendList contains a list of XBackends.
+// +kubebuilder:object:root=true
+type XBackendList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []XBackend `json:"items"`
+}
+
+// BackendType defines the type of backend destination.
+//
+// +kubebuilder:validation:Enum=ExternalHostname;EndpointSelector
+type BackendType string
+
+const (
+	// BackendTypeExternalHostname indicates that the backend is an external
+	// hostname destination. This type provides first-class support for external
+	// FQDNs, replacing the need for synthetic ExternalName Services.
+	//
+	// Support: Extended
+	BackendTypeExternalHostname BackendType = "ExternalHostname"
+
+	// BackendTypeEndpointSelector indicates that the backend routes to a
+	// selected set of in-cluster endpoints. This type behaves equivalently
+	// to a Service backendRef but provides a dedicated resource where
+	// backend-level configuration can live and grow.
+	//
+	// Support: Core
+	BackendTypeEndpointSelector BackendType = "EndpointSelector"
+)
+
+// BackendSpec defines the desired state of a Backend.
+//
+// +kubebuilder:validation:XValidation:rule="self.type == 'ExternalHostname' ? has(self.externalHostname) : !has(self.externalHostname)",message="externalHostname must be set when type is ExternalHostname and must be unset otherwise"
+// +kubebuilder:validation:XValidation:rule="self.type == 'EndpointSelector' ? has(self.endpointSelector) : !has(self.endpointSelector)",message="endpointSelector must be set when type is EndpointSelector and must be unset otherwise"
+// +kubebuilder:validation:XValidation:rule="!has(self.protocol) || self.protocol != 'H2C' || !has(self.tls) || self.tls.mode == 'None'",message="tls must be disabled when protocol is H2C, use protocol HTTP2 for HTTP/2 with tls"
+// +kubebuilder:validation:XValidation:rule="!has(self.protocol) || self.protocol != 'HTTP2' || (has(self.tls) && self.tls.mode != 'None')",message="tls must be enabled when protocol is HTTP2, use protocol H2C for HTTP/2 without tls"
+// +kubebuilder:validation:XValidation:rule="!has(self.protocol) || self.protocol != 'WSS' || (has(self.tls) && self.tls.mode != 'None')",message="tls must be enabled when protocol is WSS"
+// +kubebuilder:validation:XValidation:rule="has(self.sessionPersistence) ? self.type == 'EndpointSelector' : true",message="sessionPersistence can only be set when type is EndpointSelector"
+type BackendSpec struct {
+	// Type defines the backend type.
+	//
+	// +unionDiscriminator
+	// +required
+	Type BackendType `json:"type"`
+
+	// Port defines the port to connect to on this backend.
+	// For ExternalHostname, this is the port on the external host.
+	// For EndpointSelector, this specifies which endpoint port to connect to.
+	//
+	// +required
+	Port BackendPort `json:"port"`
+
+	// ExternalHostname specifies the configuration for an ExternalHostname
+	// backend. This field must be set when type is ExternalHostname and must
+	// be unset otherwise.
+	//
+	// Support: Extended
+	//
+	// +optional
+	ExternalHostname *ExternalHostnameBackend `json:"externalHostname,omitempty"`
+
+	// EndpointSelector specifies the configuration for an EndpointSelector
+	// backend. This field must be set when type is EndpointSelector and must
+	// be unset otherwise.
+	//
+	// +optional
+	EndpointSelector *EndpointSelectorBackend `json:"endpointSelector,omitempty"`
+
+	// SessionPersistence defines and configures session persistence
+	// across the endpoints selected by this backend.
+	//
+	// This field can only be configured when type is EndpointSelector.
+	//
+	// Support: Extended
+	//
+	// +optional
+	SessionPersistence *SessionPersistence `json:"sessionPersistence,omitempty"`
+
+	// Protocol defines the protocol for backend communication.
+	//
+	// In the common case, the underlying transport protocol for the
+	// proxied traffic will already have been determined and processed
+	// by the dataplane at the routing step. Where this field is useful
+	// is either for higher level protocols or asymmetrical protocol
+	// configurations (e.g. version upgrades or h2c).
+	//
+	// When set, the implementation uses the specified protocol when connecting
+	// to this backend. When not set, the implementation will use the protocol
+	// determined by the route or listener configuration.
+	//
+	// Support: Core - HTTP, HTTP2, H2C, and HTTP11
+	//
+	// Support: Extended - GRPC, MCP, TCP, WSS
+	//
+	// <gateway:util:excludeFromCRD>
+	// Notes for implementers:
+	//
+	// In cases where the protocol is negotiated on the wire (e.g. HTTP/1.1
+	// Upgrade or ALPN), implementations MUST include the protocol set here
+	// in the negotiation options presented to the backend.
+	// </gateway:util:excludeFromCRD>
+	//
+	// +optional
+	Protocol *BackendProtocol `json:"protocol,omitempty"`
+
+	// TLS defines the TLS configuration that the implementation should use
+	// when connecting to the backend.
+	//
+	// ExternalHostname backends SHOULD have TLS configured; the lack of TLS
+	// for external hostnames should be considered insecure and a security risk.
+	//
+	// Support: Core - for TLS mode None
+	//
+	// Support: Extended - for TLS mode ServerOnly and ClientAndServer
+	//
+	// +optional
+	// +kubebuilder:default={mode: None}
+	TLS *BackendTLS `json:"tls,omitempty"`
+}
+
+// BackendPort describes the port the implementation should use when connecting
+// to a Backend.
+//
+// +kubebuilder:validation:MinProperties=1
+type BackendPort struct {
+	// Number represents the port number of the destination.
+	//
+	// +optional
+	Number PortNumber `json:"number,omitempty"`
+}
+
+// ExternalHostnameBackend specifies the configuration for a backend that
+// represents an external hostname destination.
+type ExternalHostnameBackend struct {
+	// Hostname specifies the FQDN used to reach this backend.
+	// IP addresses are not allowed in this field.
+	//
+	// <gateway:util:excludeFromCRD>
+	// Notes for implementers:
+	//
+	// Implementations that are aware of custom trust domains being used for
+	// Service FQDNs MUST also enforce that hostnames ending with those trust
+	// domains (e.g. .cluster.local) are not allowed.
+	// </gateway:util:excludeFromCRD>
+	//
+	// +kubebuilder:validation:XValidation:rule="!self.endsWith('.cluster.local')",message="hostname must not be an IP address or end with .cluster.local"
+	// +required
+	Hostname v1.PreciseHostname `json:"hostname,omitempty"`
+}
+
+// EndpointSelectorBackend specifies the configuration for a backend that
+// selects a set of pods by label.
+type EndpointSelectorBackend struct {
+	// Selector defines the label selector used to identify the set of pods whose
+	// IP addresses will make up the endpoints that this Backend should route
+	// traffic to.
+	//
+	// If this field is set, the endpoints are resolved automatically and stay up
+	// to date as pods matching the selector are added or removed; the user does
+	// not create or manage any separate endpoint resource.
+	//
+	// <gateway:util:excludeFromCRD>
+	// Notes for implementers:
+	//
+	// This is an embedded struct to avoid stuttering in the API
+	// (i.e. `endpointSelector.selector`).
+	//
+	// Implementations MAY create a Service from the label selector for endpoint
+	// resolution until the upstream EndpointSelector resource (KEP-6116) is
+	// available. Implementations SHOULD set ownerReferences so the created
+	// resource's lifecycle is tied to this Backend. This Service only exists to
+	// produce EndpointSlices; Service-level behaviors (including but not limited
+	// to internalTrafficPolicy, externalTrafficPolicy, sessionAffinity, and
+	// trafficDistribution) play no role. The Service port (ClusterIP frontend)
+	// is unused; the targetPort SHOULD be set to Backend.spec.port.number.
+	// Implementations SHOULD create the Service as headless (clusterIP: None),
+	// since no ClusterIP or kube-proxy load balancing is needed.
+	// Implementations MUST name the Service with generateName rather than a
+	// predictable name, so that a name like <backend-name>-backend.svc.cluster.local
+	// does not become a relied-upon DNS entry.
+	// </gateway:util:excludeFromCRD>
+	//
+	// +optional
+	LabelSelector `json:",inline"`
+}
+
+// LabelSelector defines a query for resources based on their labels.
+type LabelSelector struct {
+	// MatchLabels contains a set of required {key,value} pairs.
+	// An object must match every label in this map to be selected.
+	// The matching logic is an AND operation on all entries.
+	//
+	// +required
+	// +kubebuilder:validation:MinProperties=1
+	// +kubebuilder:validation:MaxProperties=64
+	// +kubebuilder:validation:XValidation:message="Label keys must be in the form of an optional DNS subdomain prefix not longer than 253 characters followed by a required name segment of up to 63 characters.",rule="self.all(key, !format.qualifiedName().validate(key).hasValue())"
+	MatchLabels map[v1.LabelKey]v1.LabelValue `json:"matchLabels"` //nolint:kubeapilinter
+}
+
+// BackendProtocol defines the protocol used when connecting to a backend.
+//
+// +kubebuilder:validation:Enum=TCP;HTTP;HTTP2;HTTP11;H2C;MCP;GRPC;WSS
+type BackendProtocol string
+
+const (
+	// BackendProtocolMCP indicates the Model Context Protocol.
+	//
+	// Support: Extended
+	BackendProtocolMCP BackendProtocol = "MCP"
+
+	// BackendProtocolTCP indicates plain TCP.
+	//
+	// Support: Extended
+	BackendProtocolTCP BackendProtocol = "TCP"
+
+	// BackendProtocolHTTP indicates HTTP (version negotiated via ALPN or
+	// implementation default).
+	//
+	// Support: Core
+	BackendProtocolHTTP BackendProtocol = "HTTP"
+
+	// BackendProtocolHTTP2 indicates HTTP/2.
+	//
+	// Support: Core
+	BackendProtocolHTTP2 BackendProtocol = "HTTP2"
+
+	// BackendProtocolHTTP11 indicates HTTP/1.1.
+	//
+	// Support: Core
+	BackendProtocolHTTP11 BackendProtocol = "HTTP11"
+
+	// BackendProtocolH2C indicates HTTP/2 over cleartext (h2c).
+	//
+	// Support: Core
+	BackendProtocolH2C BackendProtocol = "H2C"
+
+	// BackendProtocolGRPC indicates gRPC
+	//
+	// Support: Extended
+	BackendProtocolGRPC BackendProtocol = "GRPC"
+
+	// BackendProtocolWSS indicates WebSocket over TLS as described in RFC6445.
+	//
+	// Support: Extended
+	BackendProtocolWSS BackendProtocol = "WSS"
+)
+
+// BackendTLSMode defines the TLS mode for backend connections.
+//
+// +kubebuilder:validation:Enum=None;ServerOnly;ClientAndServer
+type BackendTLSMode string
+
+const (
+	// BackendTLSModeNone disables TLS when connecting to the backend.
+	BackendTLSModeNone BackendTLSMode = "None"
+
+	// BackendTLSModeServerOnly enables TLS with server certificate verification.
+	BackendTLSModeServerOnly BackendTLSMode = "ServerOnly"
+
+	// BackendTLSModeClientAndServer enables mutual TLS (mTLS).
+	BackendTLSModeClientAndServer BackendTLSMode = "ClientAndServer"
+)
+
+// BackendTLS defines TLS configuration for connecting to a backend.
+//
+// +kubebuilder:validation:XValidation:rule="self.mode == 'ClientAndServer' ? has(self.clientCertificateRef) : !has(self.clientCertificateRef)",message="clientCertificateRef must be set if and only if mode is ClientAndServer"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'None' ? !has(self.validation) : has(self.validation)",message="validation must be set if and only if mode is either ClientAndServer or ServerOnly"
+type BackendTLS struct {
+	// Mode defines the TLS mode for the backend connection.
+	//
+	// Support: Core - None
+	//
+	// Support: Extended - ServerOnly, ClientAndServer
+	//
+	// +required
+	Mode BackendTLSMode `json:"mode"`
+
+	// ClientCertificateRef is a reference to a Secret containing the client
+	// TLS certificate and private key for mutual TLS. This field is required
+	// when mode is ClientAndServer and must be unset otherwise.
+	//
+	// +optional
+	ClientCertificateRef *v1.SecretObjectReference `json:"clientCertificateRef,omitempty"`
+
+	// Validation contains TLS validation configuration for the backend connection.
+	//
+	// +optional
+	Validation *v1.BackendTLSPolicyValidation `json:"validation,omitempty"`
+}
+
+// BackendStatus defines the observed state of a Backend.
+type BackendStatus struct {
+	// Ancestors is a list of ancestor resources (usually Gateways) that are
+	// associated with this Backend, and the status of the Backend with respect
+	// to each ancestor.
+	//
+	// A maximum of 32 ancestors will be represented in this list. An empty list
+	// indicates that the Backend is not associated with any ancestors.
+	//
+	// <gateway:util:excludeFromCRD>
+	// Notes for implementers:
+	//
+	// A controller that manages the Backend must add an entry for each ancestor
+	// it manages and remove the entry when the controller no longer considers
+	// the Backend to be associated with that ancestor.
+	//
+	// TODO: We may discover that this creates unnecessary apiserver/informer overhead
+	// for little benefit. It may also be unnecessarily complex for implementations to manage.
+	// If so, we'll remove the ancestor-based grouping and make it controller only.
+	// </gateway:util:excludeFromCRD>
+	//
+	// +kubebuilder:validation:MaxItems=32
+	// +optional
+	// +listType=atomic
+	Ancestors []BackendAncestorStatus `json:"ancestors,omitempty"`
+}
+
+// BackendAncestorStatus describes the status of a Backend with respect to a
+// specific ancestor resource (typically a Gateway).
+type BackendAncestorStatus struct {
+	// ControllerName is a domain/path string that indicates the name of the
+	// controller that manages the Backend.
+	//
+	// Example: "example.net/gateway-controller".
+	//
+	// The format of this field is DOMAIN "/" PATH, where DOMAIN and PATH are
+	// valid Kubernetes names
+	// (https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names).
+	//
+	// <gateway:util:excludeFromCRD>
+	// Notes for implementers:
+	//
+	// A controller MUST populate this field when writing status and ensure that
+	// entries to status populated with their controller name are removed when
+	// they are no longer necessary.
+	// </gateway:util:excludeFromCRD>
+	//
+	// +required
+	ControllerName v1.GatewayController `json:"controllerName"`
+
+	// AncestorRef identifies the ancestor resource that this status is
+	// associated with.
+	//
+	// +required
+	AncestorRef v1.ParentReference `json:"ancestorRef"`
+
+	// For Kubernetes API conventions, see:
+	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+	// conditions represent the current state of the Backend resource.
+	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
+	//
+	// Defined condition types include:
+	// - "Accepted": the resource has been acknowledged and accepted by the controller
+	//
+	// The status of each condition is one of True, False, or Unknown.
+	//
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// BackendConditionType is a type of condition for a Backend.
+type BackendConditionType string
+
+// BackendConditionReason is a reason for a Backend condition.
+type BackendConditionReason string
+
+const (
+	// BackendConditionAccepted indicates whether the Backend has been accepted
+	// by a controller.
+	BackendConditionAccepted BackendConditionType = "Accepted"
+
+	// BackendReasonAccepted is used with the "Accepted" condition when the
+	// Backend has been accepted.
+	BackendReasonAccepted BackendConditionReason = "Accepted"
+)

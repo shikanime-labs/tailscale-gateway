@@ -20,8 +20,25 @@ package v1
 
 // ForwardBodyConfigApplyConfiguration represents a declarative configuration of the ForwardBodyConfig type for use
 // with apply.
+//
+// ForwardBody configures if requests to the authorization server should include
+// the body of the client request; and if so, how big that body is allowed
+// to be.
+//
+// If empty or unset, do not forward the body.
 type ForwardBodyConfigApplyConfiguration struct {
-	MaxSize *uint16 `json:"maxSize,omitempty"`
+	// MaxSize specifies how large in bytes the largest body that will be buffered
+	// and sent to the authorization server. If the body size is larger than
+	// `maxSize`, then the body sent to the authorization server must be
+	// truncated to `maxSize` bytes.
+	//
+	// Experimental note: This behavior needs to be checked against
+	// various dataplanes; it may need to be changed.
+	// See https://github.com/kubernetes-sigs/gateway-api/pull/4001#discussion_r2291405746
+	// for more.
+	//
+	// If 0, the body will not be sent to the authorization server.
+	MaxSize *int32 `json:"maxSize,omitempty"`
 }
 
 // ForwardBodyConfigApplyConfiguration constructs a declarative configuration of the ForwardBodyConfig type for use with
@@ -33,7 +50,7 @@ func ForwardBodyConfig() *ForwardBodyConfigApplyConfiguration {
 // WithMaxSize sets the MaxSize field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the MaxSize field is set to the value of the last call.
-func (b *ForwardBodyConfigApplyConfiguration) WithMaxSize(value uint16) *ForwardBodyConfigApplyConfiguration {
+func (b *ForwardBodyConfigApplyConfiguration) WithMaxSize(value int32) *ForwardBodyConfigApplyConfiguration {
 	b.MaxSize = &value
 	return b
 }
