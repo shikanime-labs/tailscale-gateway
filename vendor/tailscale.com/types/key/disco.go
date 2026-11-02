@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 package key
@@ -39,6 +39,16 @@ func NewDisco() DiscoPrivate {
 	rand(ret.k[:])
 	// Key used for nacl seal/open, so needs to be clamped.
 	clamp25519Private(ret.k[:])
+	return ret
+}
+
+// DiscoPrivateFromRaw32 parses a 32-byte raw value as a DiscoPrivate.
+func DiscoPrivateFromRaw32(raw mem.RO) DiscoPrivate {
+	if raw.Len() != 32 {
+		panic("input has wrong size")
+	}
+	var ret DiscoPrivate
+	raw.Copy(ret.k[:])
 	return ret
 }
 

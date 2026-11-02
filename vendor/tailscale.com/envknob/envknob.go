@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 // Package envknob provides access to environment-variable tweakable
@@ -35,6 +35,7 @@ import (
 	"tailscale.com/kube/kubetypes"
 	"tailscale.com/syncs"
 	"tailscale.com/types/opt"
+	"tailscale.com/util/testenv"
 	"tailscale.com/version"
 	"tailscale.com/version/distro"
 )
@@ -108,6 +109,26 @@ func Setenv(envVar, val string) {
 	if p := regDuration[envVar]; p != nil {
 		setDurationLocked(p, envVar, val)
 	}
+}
+
+// SetenvForTest safely changes an environment variable in a test.
+//
+// It is designed to avoid leaking state between tests. It registers
+// a cleanup function to reset the variable once the test completes,
+// and panics if you try to set environment variables in parallel tests.
+//
+// Use this instead of t.Setenv() if your variable will be read by envknob,
+// and you need to update envknob's internal caches with the new value.
+func SetenvForTest(t testenv.TB, envVar, val string) {
+	t.Helper()
+
+	// This is copied from [tstest.AssertNotParallel], which we can't
+	// call here because it would create an import cycle.
+	t.Setenv("ASSERT_NOT_PARALLEL_TEST", "1") // panics if t.Parallel was called
+
+	prev := String(envVar)
+	Setenv(envVar, val)
+	t.Cleanup(func() { Setenv(envVar, prev) })
 }
 
 // String returns the named environment variable, using os.Getenv.
@@ -404,6 +425,9 @@ func SSHIgnoreTailnetPolicy() bool { return Bool("TS_DEBUG_SSH_IGNORE_TAILNET_PO
 
 // TKASkipSignatureCheck reports whether to skip node-key signature checking for development.
 func TKASkipSignatureCheck() bool { return Bool("TS_UNSAFE_SKIP_NKS_VERIFICATION") }
+
+// AssumeNetworkUp reports whether to assume network connectivity for development.
+func AssumeNetworkUp() bool { return Bool("TS_ASSUME_NETWORK_UP_FOR_TEST") }
 
 // App returns the tailscale app type of this instance, if set via
 // TS_INTERNAL_APP env var. TS_INTERNAL_APP can be used to set app type for

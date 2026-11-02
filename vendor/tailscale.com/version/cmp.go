@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 package version
@@ -101,6 +101,11 @@ func parse(version string) (parsed, bool) {
 		if len(rest) == 0 {
 			return ret, true
 		}
+	}
+
+	// Ignore trailer like '_1 (Void Linux)'.
+	if rest[0] == '_' && strings.HasSuffix(rest, " (Void Linux)") {
+		return ret, true
 	}
 
 	// Optional extraCommits, if the next bit can be completely

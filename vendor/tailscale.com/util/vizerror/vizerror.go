@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 // Package vizerror provides types and utility funcs for handling visible errors
@@ -77,6 +77,5 @@ func WrapWithMessage(wrapped error, publicMsg string) error {
 
 // As returns the first vizerror.Error in err's chain.
 func As(err error) (e Error, ok bool) {
-	ok = errors.As(err, &e)
-	return
+	return errors.AsType[Error](err)
 }

@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 package eventbus
@@ -101,6 +101,15 @@ func (b *Bus) Client(name string) *Client {
 // Debugger returns the debugging facility for the bus.
 func (b *Bus) Debugger() *Debugger {
 	return &Debugger{b}
+}
+
+// ProbeLocks acquires and releases the bus's internal mutexes.
+func (b *Bus) ProbeLocks() {
+	b.topicsMu.Lock()
+	b.topicsMu.Unlock()
+
+	b.clientsMu.Lock()
+	b.clientsMu.Unlock()
 }
 
 // Close closes the bus. It implicitly closes all clients, publishers and

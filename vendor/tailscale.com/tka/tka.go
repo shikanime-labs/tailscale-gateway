@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 //go:build !ts_omit_tailnetlock
@@ -30,9 +30,6 @@ var cborDecOpts = cbor.DecOptions{
 	MaxArrayElements: 4096,
 	MaxMapPairs:      1024,
 }
-
-// Arbitrarily chosen limit on scanning AUM trees.
-const maxScanIterations = 2000
 
 // Authority is a Tailnet Key Authority. This type is the main coupling
 // point to the rest of the tailscale client.
@@ -570,7 +567,7 @@ func Bootstrap(storage Chonk, bootstrap AUM) (*Authority, error) {
 // ValidDisablement returns true if the disablement secret was correct.
 //
 // If this method returns true, the caller should shut down the authority
-// and purge all network-lock state.
+// and purge all tailnet-lock state.
 func (a *Authority) ValidDisablement(secret []byte) bool {
 	return a.state.checkDisablement(secret)
 }
