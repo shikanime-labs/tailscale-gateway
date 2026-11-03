@@ -225,7 +225,7 @@ go4.org/mem
 # go4.org/netipx v0.0.0-20260823151212-3075585bcbeb
 ## explicit; go 1.18
 go4.org/netipx
-# golang.org/x/crypto v0.57.0
+# golang.org/x/crypto v0.58.0
 ## explicit; go 1.26.0
 golang.org/x/crypto/argon2
 golang.org/x/crypto/blake2b
@@ -240,7 +240,7 @@ golang.org/x/crypto/salsa20/salsa
 ## explicit; go 1.26.0
 golang.org/x/exp/constraints
 golang.org/x/exp/maps
-# golang.org/x/net v0.59.0
+# golang.org/x/net v0.60.0
 ## explicit; go 1.26.0
 golang.org/x/net/http/httpguts
 golang.org/x/net/http2
@@ -253,19 +253,19 @@ golang.org/x/net/internal/httpsfv
 golang.org/x/oauth2
 golang.org/x/oauth2/clientcredentials
 golang.org/x/oauth2/internal
-# golang.org/x/sync v0.23.0
+# golang.org/x/sync v0.24.0
 ## explicit; go 1.26.0
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.48.0
+# golang.org/x/sys v0.49.0
 ## explicit; go 1.26.0
 golang.org/x/sys/cpu
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.46.0
+# golang.org/x/term v0.47.0
 ## explicit; go 1.26.0
 golang.org/x/term
-# golang.org/x/text v0.42.0
+# golang.org/x/text v0.43.0
 ## explicit; go 1.26.0
 golang.org/x/text/encoding
 golang.org/x/text/encoding/internal
@@ -925,7 +925,7 @@ sigs.k8s.io/structured-merge-diff/v6/value
 # sigs.k8s.io/yaml v1.6.0
 ## explicit; go 1.22
 sigs.k8s.io/yaml
-# tailscale.com v1.104.2
+# tailscale.com v1.104.5
 ## explicit; go 1.27.3
 tailscale.com
 tailscale.com/atomicfile
