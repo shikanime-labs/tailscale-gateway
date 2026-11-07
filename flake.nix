@@ -56,6 +56,8 @@
               devlib.devenvModules.shikanime-studio
             ];
 
+            languages.go.package = pkgs.go_1_27;
+
             git-hooks.hooks.gotest.excludes = [ "^e2e/*" ];
 
             github.workflows = {
@@ -78,7 +80,7 @@
             ];
           };
 
-          packages.default = pkgs.buildGoModule {
+          packages.default = pkgs.buildGoModule.override { go = pkgs.go_1_27; } {
             pname = "tailscale-gateway";
             version = "v0.1.0";
             src = cleanSource ./.;
