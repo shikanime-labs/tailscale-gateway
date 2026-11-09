@@ -44,10 +44,19 @@
         {
           lib,
           pkgs,
+          system,
           ...
         }:
         with lib;
         {
+          # treefmt's golines/goimports shell out to `go`; with go.mod at 1.27.3
+          # the 1.26 default would try a network toolchain download in the
+          # no-network check sandbox. Point the whole package set at go_1_27.
+          _module.args.pkgs = import inputs.nixpkgs {
+            inherit system;
+            overlays = [ (final: _prev: { go = final.go_1_27; }) ];
+          };
+
           devenv.shells.default = {
             imports = [
               devlib.devenvModules.go
@@ -59,6 +68,9 @@
             languages.go.package = pkgs.go_1_27;
 
             git-hooks.hooks.gotest.excludes = [ "^e2e/*" ];
+            # e2e files are gated behind the `e2e` build tag, so the default
+            # lint pass sees a package with no files and aborts.
+            git-hooks.hooks.golangci-lint.excludes = [ "^e2e/*" ];
 
             github.workflows = {
               integration.enable = true;
