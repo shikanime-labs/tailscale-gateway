@@ -43,19 +43,19 @@ jobs:
     steps:
       - id: createGithubAppToken
         continue-on-error: true
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           app-id: ${{ vars.OPERATOR_APP_ID }}
           permission-contents: write
           permission-workflows: write
           private-key: ${{ secrets.OPERATOR_PRIVATE_KEY }}
-      - uses: shikanime-studio/actions/nix/setup@v9
+      - uses: shikanime-studio/actions/nix/setup@8144b45cf1aed7ee09337cbca6b7d94b4693ef5e # v9
         with:
           github-token: ${{ steps.createGithubAppToken.outputs.token }}
-      - uses: shikanime-studio/actions/checkout@v9
+      - uses: shikanime-studio/actions/checkout@8144b45cf1aed7ee09337cbca6b7d94b4693ef5e # v9
         with:
           github-token: ${{ steps.createGithubAppToken.outputs.token }}
-      - uses: shikanime-studio/actions/release@v9
+      - uses: shikanime-studio/actions/release@8144b45cf1aed7ee09337cbca6b7d94b4693ef5e # v9
         with:
           github-token: ${{ steps.createGithubAppToken.outputs.token }}
           ref: ${{ github.ref_name || github.event.inputs.ref_name }}
