@@ -24,10 +24,84 @@ import (
 
 // GRPCRouteSpecApplyConfiguration represents a declarative configuration of the GRPCRouteSpec type for use
 // with apply.
+//
+// GRPCRouteSpec defines the desired state of GRPCRoute
 type GRPCRouteSpecApplyConfiguration struct {
-	CommonRouteSpecApplyConfiguration `json:",inline"`
-	Hostnames                         []apisv1.Hostname                 `json:"hostnames,omitempty"`
-	Rules                             []GRPCRouteRuleApplyConfiguration `json:"rules,omitempty"`
+	CommonRouteSpecApplyConfiguration `json:""`
+	// Hostnames defines a set of hostnames to match against the GRPC
+	// Host header to select a GRPCRoute to process the request. This matches
+	// the RFC 1123 definition of a hostname with 2 notable exceptions:
+	//
+	// 1. IPs are not allowed.
+	// 2. A hostname may be prefixed with a wildcard label (`*.`). The wildcard
+	// label MUST appear by itself as the first label.
+	//
+	// If a hostname is specified by both the Listener and GRPCRoute, there
+	// MUST be at least one intersecting hostname for the GRPCRoute to be
+	// attached to the Listener. For example:
+	//
+	// * A Listener with `test.example.com` as the hostname matches GRPCRoutes
+	// that have either not specified any hostnames, or have specified at
+	// least one of `test.example.com` or `*.example.com`.
+	// * A Listener with `*.example.com` as the hostname matches GRPCRoutes
+	// that have either not specified any hostnames or have specified at least
+	// one hostname that matches the Listener hostname. For example,
+	// `test.example.com` and `*.example.com` would both match. On the other
+	// hand, `example.com` and `test.example.net` would not match.
+	//
+	// Hostnames that are prefixed with a wildcard label (`*.`) are interpreted
+	// as a suffix match. That means that a match for `*.example.com` would match
+	// both `test.example.com`, and `foo.test.example.com`, but not `example.com`.
+	//
+	// If both the Listener and GRPCRoute have specified hostnames, any
+	// GRPCRoute hostnames that do not match the Listener hostname MUST be
+	// ignored. For example, if a Listener specified `*.example.com`, and the
+	// GRPCRoute specified `test.example.com` and `test.example.net`,
+	// `test.example.net` MUST NOT be considered for a match.
+	//
+	// If both the Listener and GRPCRoute have specified hostnames, and none
+	// match with the criteria above, then the GRPCRoute MUST NOT be accepted by
+	// the implementation. The implementation MUST raise an 'Accepted' Condition
+	// with a status of `False` in the corresponding RouteParentStatus.
+	//
+	// In the event that multiple GRPCRoutes specify intersecting hostnames (e.g.
+	// overlapping wildcard matching and exact matching hostnames), precedence must
+	// be given to rules from the GRPCRoute with the largest number of:
+	//
+	// * Characters in a matching non-wildcard hostname.
+	// * Characters in a matching hostname.
+	//
+	// When multiple GRPCRoutes attach to the same Listener and yield identical
+	// Listener/Route intersected hostnames, implementations SHOULD evaluate
+	// precedence using the original hostnames configured on the Route, not the
+	// calculated Listener/Route hostname intersection.
+	//
+	// Resolving Route precedence using original Route hostname specificity is an
+	// Extended feature. Implementations that support this behavior SHOULD claim
+	// support for the `GatewayRouteHostnameIntersectionPrecedence` feature.
+	// Implementations that do not support this feature MAY evaluate precedence
+	// using the calculated Listener/Route hostname intersection.
+	//
+	// If a Route (A) of type HTTPRoute or GRPCRoute is attached to a
+	// Listener and that listener already has another Route (B) of the other
+	// type attached and the intersection of the hostnames of A and B is
+	// non-empty, then the implementation MAY reject one of the two routes.
+	// An implementation that does so MUST accept exactly one of them,
+	// determined by the following criteria, in order:
+	//
+	// * The oldest Route based on creation timestamp.
+	// * The Route appearing first in alphabetical order by
+	// "{namespace}/{name}".
+	//
+	// The rejected Route MUST raise an 'Accepted' condition with a status of
+	// 'False' in the corresponding RouteParentStatus.
+	//
+	// Support: Core
+	//
+	Hostnames []apisv1.Hostname `json:"hostnames,omitempty"`
+	// Rules are a list of GRPC matchers, filters and actions.
+	//
+	Rules []GRPCRouteRuleApplyConfiguration `json:"rules,omitempty"`
 }
 
 // GRPCRouteSpecApplyConfiguration constructs a declarative configuration of the GRPCRouteSpec type for use with

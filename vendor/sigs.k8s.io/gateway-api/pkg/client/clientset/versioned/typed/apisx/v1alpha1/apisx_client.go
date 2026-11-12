@@ -28,9 +28,10 @@ import (
 
 type ExperimentalV1alpha1Interface interface {
 	RESTClient() rest.Interface
+	XBackendsGetter
 	XBackendTrafficPoliciesGetter
-	XListenerSetsGetter
 	XMeshesGetter
+	XTelemetryPoliciesGetter
 }
 
 // ExperimentalV1alpha1Client is used to interact with features provided by the gateway.networking.x-k8s.io group.
@@ -38,16 +39,20 @@ type ExperimentalV1alpha1Client struct {
 	restClient rest.Interface
 }
 
+func (c *ExperimentalV1alpha1Client) XBackends(namespace string) XBackendInterface {
+	return newXBackends(c, namespace)
+}
+
 func (c *ExperimentalV1alpha1Client) XBackendTrafficPolicies(namespace string) XBackendTrafficPolicyInterface {
 	return newXBackendTrafficPolicies(c, namespace)
 }
 
-func (c *ExperimentalV1alpha1Client) XListenerSets(namespace string) XListenerSetInterface {
-	return newXListenerSets(c, namespace)
-}
-
 func (c *ExperimentalV1alpha1Client) XMeshes() XMeshInterface {
 	return newXMeshes(c)
+}
+
+func (c *ExperimentalV1alpha1Client) XTelemetryPolicies(namespace string) XTelemetryPolicyInterface {
+	return newXTelemetryPolicies(c, namespace)
 }
 
 // NewForConfig creates a new ExperimentalV1alpha1Client for the given config.
