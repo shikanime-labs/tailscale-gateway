@@ -1,5 +1,7 @@
 package gofakeit
 
+import "strings"
+
 // Company will generate a random company name string
 func Company() string { return company(GlobalFaker) }
 
@@ -94,20 +96,36 @@ func (f *Faker) Slogan() string { return slogan(f) }
 
 // Slogan will generate a random company slogan
 func slogan(f *Faker) string {
-	slogan := ""
-	var sloganStyle = number(f, 0, 2)
-	switch sloganStyle {
-	// Noun. Buzzword!
-	case 0:
-		slogan = getRandValue(f, []string{"company", "blurb"}) + ". " + getRandValue(f, []string{"company", "buzzwords"}) + "!"
-	// Buzzword Noun, Buzzword Noun.
-	case 1:
-		slogan = getRandValue(f, []string{"company", "buzzwords"}) + " " + getRandValue(f, []string{"company", "blurb"}) + ", " + getRandValue(f, []string{"company", "buzzwords"}) + " " + getRandValue(f, []string{"company", "blurb"}) + "."
-	// Buzzword bs Noun, Buzzword.
-	case 2:
-		slogan = getRandValue(f, []string{"company", "buzzwords"}) + " " + getRandValue(f, []string{"company", "bs"}) + " " + getRandValue(f, []string{"company", "blurb"}) + ", " + getRandValue(f, []string{"company", "buzzwords"}) + "."
+	// Pick a mad-libs style template and fill the {tokens} with random words.
+	// The templates vary in structure and length to produce slogan-like phrases
+	// rather than a fixed sentence shape. Tokens are limited to lookups that
+	// still read like brand copy (blurb, buzzword, product*, safecolor).
+	slogan, err := generate(f, getRandValue(f, []string{"company", "slogan"}))
+	if err != nil {
+		return ""
 	}
-	return slogan
+
+	// Filled tokens come in mixed case, so leaving them as-is throws the
+	// reading off. Lower the whole slogan, then capitalize the first letter
+	// of each sentence so it reads cleanly no matter which token filled a
+	// given spot.
+	b := []byte(strings.ToLower(slogan))
+	capNext := true
+	for i := range b {
+		switch c := b[i]; {
+		case c == '.' || c == '!' || c == '?':
+			capNext = true
+		case c == ' ':
+			// keep looking for the start of the sentence
+		default:
+			if capNext && c >= 'a' && c <= 'z' {
+				b[i] = c - ('a' - 'A')
+			}
+			capNext = false
+		}
+	}
+
+	return string(b)
 }
 
 func addCompanyLookup() {
@@ -125,7 +143,7 @@ func addCompanyLookup() {
 			"legal entity",
 		},
 		Keywords: []string{
-			"company", "business", "organization", "corporation",
+			"business", "organization", "corporation",
 			"enterprise", "firm", "entity", "brand",
 			"employer", "vendor", "partner",
 		},
@@ -172,7 +190,7 @@ func addCompanyLookup() {
 			"consulting speak",
 		},
 		Keywords: []string{
-			"bs", "jargon", "buzzwords", "synergy", "leverage",
+			"jargon", "buzzwords", "synergy", "leverage",
 			"disrupt", "innovate", "scalable", "agile", "optimize",
 			"pipeline", "roadmap", "vision", "strategy", "corporate",
 		},
@@ -195,7 +213,7 @@ func addCompanyLookup() {
 			"about text",
 		},
 		Keywords: []string{
-			"blurb", "summary", "overview", "description",
+			"summary", "overview", "description",
 			"company", "profile", "about", "intro",
 			"purpose", "mission", "vision", "statement",
 			"services", "products", "offerings",
@@ -219,7 +237,7 @@ func addCompanyLookup() {
 			"marketing phrase",
 		},
 		Keywords: []string{
-			"buzzword", "jargon", "hype", "trend", "phrase",
+			"jargon", "hype", "trend", "phrase",
 			"term", "corporate", "management", "marketing",
 			"innovation", "paradigm", "disruptive", "visionary",
 			"fashionable", "impressive",
@@ -232,7 +250,7 @@ func addCompanyLookup() {
 	AddFuncLookup("job", Info{
 		Display:     "Job",
 		Category:    "company",
-		Description: "Position or role in employment, involving specific tasks and responsibilities",
+		Description: "Occupation or role in employment, involving specific tasks and responsibilities",
 		Example: `{
 	"company": "ClearHealthCosts",
 	"title": "Agent",
@@ -247,11 +265,13 @@ func addCompanyLookup() {
 			"employment role",
 			"work role",
 			"career role",
+			"occupation",
 			"occupation role",
+			"occupation job",
 		},
 		Keywords: []string{
-			"job", "role", "position", "employment", "work",
-			"career", "occupation", "profession", "title",
+			"role", "position", "employment", "work",
+			"career", "profession", "title",
 			"responsibilities", "tasks", "duties",
 			"staff", "employee", "hiring", "positioning",
 		},
@@ -335,7 +355,7 @@ func addCompanyLookup() {
 		Display:     "Slogan",
 		Category:    "company",
 		Description: "Catchphrase or motto used by a company to represent its brand or values",
-		Example:     "Universal seamless Focus, interactive.",
+		Example:     "Made of styrofoam.",
 		Output:      "string",
 		Aliases: []string{
 			"company slogan",
@@ -345,7 +365,7 @@ func addCompanyLookup() {
 			"advertising slogan",
 		},
 		Keywords: []string{
-			"slogan", "tagline", "motto", "catchphrase",
+			"tagline", "motto", "catchphrase",
 			"brand", "company", "marketing", "advertising",
 			"identity", "values", "mission", "vision",
 			"strapline", "promo", "campaign",

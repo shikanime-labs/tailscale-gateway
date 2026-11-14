@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,7 +12,7 @@ import (
 
 // FuncLookups is the primary map array with mapping to all available data
 var FuncLookups map[string]Info
-var lockFuncLookups sync.Mutex
+var lockFuncLookups sync.RWMutex
 
 // MapParams is the values to pass into a lookup generate
 type MapParams map[string]MapParamsValue
@@ -56,6 +57,7 @@ func init() { initLookup() }
 // init will add all the functions to MapLookups
 func initLookup() {
 	addAddressLookup()
+	addAirlineLookup()
 	addAnimalLookup()
 	addAppLookup()
 	addAuthLookup()
@@ -80,10 +82,10 @@ func initLookup() {
 	addHackerLookup()
 	addHipsterLookup()
 	addHtmlLookup()
+	addIDLookup()
 	addImageLookup()
 	addInternetLookup()
 	addLanguagesLookup()
-	addLoremLookup()
 	addMinecraftLookup()
 	addMiscLookup()
 	addMovieLookup()
@@ -100,15 +102,12 @@ func initLookup() {
 	addWordAdverbLookup()
 	addWordConnectiveLookup()
 	addWordGeneralLookup()
-	addWordGrammerLookup()
 	addWordNounLookup()
-	addWordPhraseLookup()
 	addWordPrepositionLookup()
 	addWordPronounLookup()
-	addWordSentenceLookup()
 	addWordVerbLookup()
-	addWordCommentLookup()
 	addWordMiscLookup()
+	addTextLookup()
 }
 
 // internalFuncLookups is the internal map array with mapping to all available data
@@ -195,6 +194,9 @@ func (m *MapParamsValue) UnmarshalJSON(data []byte) error {
 }
 
 func GetRandomSimpleFunc(f *Faker) (string, Info) {
+	lockFuncLookups.RLock()
+	defer lockFuncLookups.RUnlock()
+
 	// Loop through all the functions and add them to a slice
 	var keys []string
 	for k, info := range FuncLookups {
@@ -203,6 +205,9 @@ func GetRandomSimpleFunc(f *Faker) (string, Info) {
 			keys = append(keys, k)
 		}
 	}
+
+	// A map is read in a random order, sort the keys so the same seed picks the same function
+	sort.Strings(keys)
 
 	// Randomly grab a function from the slice
 	randomKey := randomString(f, keys)
@@ -213,18 +218,19 @@ func GetRandomSimpleFunc(f *Faker) (string, Info) {
 
 // AddFuncLookup takes a field and adds it to map
 func AddFuncLookup(functionName string, info Info) {
-	if FuncLookups == nil {
-		FuncLookups = make(map[string]Info)
-	}
-
 	// Check content type
 	if info.ContentType == "" {
 		info.ContentType = "text/plain"
 	}
 
 	lockFuncLookups.Lock()
+	defer lockFuncLookups.Unlock()
+
+	if FuncLookups == nil {
+		FuncLookups = make(map[string]Info)
+	}
+
 	FuncLookups[functionName] = info
-	lockFuncLookups.Unlock()
 }
 
 // GetFuncLookup will lookup
@@ -238,7 +244,10 @@ func GetFuncLookup(functionName string) *Info {
 		return &info
 	}
 
+	lockFuncLookups.RLock()
 	info, ok = FuncLookups[functionName]
+	lockFuncLookups.RUnlock()
+
 	if ok {
 		return &info
 	}
@@ -248,14 +257,15 @@ func GetFuncLookup(functionName string) *Info {
 
 // RemoveFuncLookup will remove a function from lookup
 func RemoveFuncLookup(functionName string) {
+	lockFuncLookups.Lock()
+	defer lockFuncLookups.Unlock()
+
 	_, ok := FuncLookups[functionName]
 	if !ok {
 		return
 	}
 
-	lockFuncLookups.Lock()
 	delete(FuncLookups, functionName)
-	lockFuncLookups.Unlock()
 }
 
 // GetAny will retrieve Any field from Info
@@ -468,7 +478,7 @@ func (i *Info) GetIntArray(m *MapParams, field string) ([]int, error) {
 	}
 
 	var ints []int
-	for i := 0; i < len(value); i++ {
+	for i := range value {
 		valueInt, err := strconv.ParseInt(value[i], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("%s value could not parse to int", value[i])
@@ -487,7 +497,7 @@ func (i *Info) GetUintArray(m *MapParams, field string) ([]uint, error) {
 	}
 
 	var uints []uint
-	for i := 0; i < len(value); i++ {
+	for i := range value {
 		valueUint, err := strconv.ParseUint(value[i], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("%s value could not parse to uint", value[i])
@@ -506,7 +516,7 @@ func (i *Info) GetFloat32Array(m *MapParams, field string) ([]float32, error) {
 	}
 
 	var floats []float32
-	for i := 0; i < len(value); i++ {
+	for i := range value {
 		valueFloat, err := strconv.ParseFloat(value[i], 32)
 		if err != nil {
 			return nil, fmt.Errorf("%s value could not parse to float", value[i])
