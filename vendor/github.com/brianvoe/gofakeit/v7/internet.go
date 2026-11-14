@@ -40,7 +40,7 @@ func url(f *Faker) string {
 	// Slugs
 	num := number(f, 1, 4)
 	slug := make([]string, num)
-	for i := 0; i < num; i++ {
+	for i := range num {
 		slug[i] = bs(f)
 	}
 
@@ -51,6 +51,25 @@ func url(f *Faker) string {
 	url = strings.Replace(url, " ", "", -1)
 
 	return url
+}
+
+// UrlSlug will generate a random url slug with the specified number of words
+func UrlSlug(words int) string { return urlSlug(GlobalFaker, words) }
+
+// UrlSlug will generate a random url slug with the specified number of words
+func (f *Faker) UrlSlug(words int) string { return urlSlug(f, words) }
+
+func urlSlug(f *Faker, words int) string {
+	if words <= 0 {
+		words = 3
+	}
+
+	slug := make([]string, words)
+	for i := 0; i < words; i++ {
+		slug[i] = strings.ToLower(word(f))
+	}
+
+	return strings.Join(slug, "-")
 }
 
 // HTTPMethod will generate a random http method
@@ -94,7 +113,7 @@ func MacAddress() string { return macAddress(GlobalFaker) }
 func (f *Faker) MacAddress() string { return macAddress(f) }
 
 func macAddress(f *Faker) string {
-	num := 255
+	num := 256
 
 	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", f.IntN(num), f.IntN(num), f.IntN(num), f.IntN(num), f.IntN(num), f.IntN(num))
 }
@@ -225,6 +244,18 @@ func operaUserAgent(f *Faker) string {
 	return "Opera/" + strconv.Itoa(randIntRange(f, 8, 10)) + "." + strconv.Itoa(randIntRange(f, 10, 99)) + " " + platform
 }
 
+// APIUserAgent will generate a random API user agent string
+func APIUserAgent() string { return apiUserAgent(GlobalFaker) }
+
+// APIUserAgent will generate a random API user agent string
+func (f *Faker) APIUserAgent() string { return apiUserAgent(f) }
+
+func apiUserAgent(f *Faker) string {
+	ua := getRandValue(f, []string{"internet", "api"})
+	result, _ := generate(f, ua)
+	return result
+}
+
 // linuxPlatformToken will generate a random linux platform
 func linuxPlatformToken(f *Faker) string {
 	return "X11; Linux " + getRandValue(f, []string{"computer", "linux_processor"})
@@ -269,9 +300,33 @@ func addInternetLookup() {
 		Example:     "http://www.principalproductize.biz/target",
 		Output:      "string",
 		Aliases:     []string{"url string", "web address", "internet link", "website url", "resource locator"},
-		Keywords:    []string{"url", "web", "address", "http", "https", "www", "protocol", "scheme", "path", "domain", "location", "resource"},
+		Keywords:    []string{"web", "address", "http", "https", "www", "protocol", "scheme", "path", "domain", "location", "resource"},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) {
 			return url(f), nil
+		},
+	})
+
+	AddFuncLookup("urlslug", Info{
+		Display:     "URL Slug",
+		Category:    "internet",
+		Description: "Simplified and URL-friendly version of a string, typically used in web addresses",
+		Example:     "bathe-regularly-quiver",
+		Output:      "string",
+		Aliases:     []string{"slug", "url path", "permalink", "friendly url"},
+		Keywords:    []string{"url", "path", "hyphen", "dash", "seo", "friendly", "web", "address", "kebab", "separator"},
+		Params: []Param{
+			{Field: "words", Display: "Words", Type: "int", Default: "3", Description: "Number of words in the slug"},
+		},
+		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) {
+			words, err := info.GetInt(m, "words")
+			if err != nil {
+				return nil, err
+			}
+			if words <= 0 {
+				words = 3
+			}
+
+			return urlSlug(f, words), nil
 		},
 	})
 
@@ -308,7 +363,7 @@ func addInternetLookup() {
 		Example:     "222.83.191.222",
 		Output:      "string",
 		Aliases:     []string{"ip address", "network address", "internet address", "device ip", "ipv4 label"},
-		Keywords:    []string{"ipv4", "address", "ip", "network", "internet", "protocol", "communication", "dotted", "decimal"},
+		Keywords:    []string{"ipv4", "ip", "network", "internet", "protocol", "communication", "dotted", "decimal"},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) {
 			return ipv4Address(f), nil
 		},
@@ -321,7 +376,7 @@ func addInternetLookup() {
 		Example:     "2001:cafe:8898:ee17:bc35:9064:5866:d019",
 		Output:      "string",
 		Aliases:     []string{"ip address", "network address", "internet address", "hex ip", "ipv6 label"},
-		Keywords:    []string{"ipv6", "address", "ip", "network", "protocol", "hexadecimal", "identification"},
+		Keywords:    []string{"ipv6", "ip", "network", "protocol", "hexadecimal", "identification"},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) {
 			return ipv6Address(f), nil
 		},
@@ -415,6 +470,19 @@ func addInternetLookup() {
 		Keywords:    []string{"safari", "apple", "ipad", "os", "applewebkit", "khtml", "gecko", "browser", "ua", "mobile"},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) {
 			return safariUserAgent(f), nil
+		},
+	})
+
+	AddFuncLookup("apiuseragent", Info{
+		Display:     "API User Agent",
+		Category:    "internet",
+		Description: "String sent by API clients, tools, or libraries to identify themselves when making HTTP requests",
+		Example:     "curl/8.2.5",
+		Output:      "string",
+		Aliases:     []string{"api ua", "api client ua", "http client ua", "api identifier", "client user agent"},
+		Keywords:    []string{"api", "useragent", "client", "http", "request", "curl", "python", "go", "java", "node", "postman", "tool", "library"},
+		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) {
+			return apiUserAgent(f), nil
 		},
 	})
 

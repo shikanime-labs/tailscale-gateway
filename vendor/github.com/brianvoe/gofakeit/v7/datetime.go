@@ -45,7 +45,7 @@ func DateRange(start, end time.Time) time.Time { return dateRange(GlobalFaker, s
 func (f *Faker) DateRange(start, end time.Time) time.Time { return dateRange(f, start, end) }
 
 func dateRange(f *Faker, start time.Time, end time.Time) time.Time {
-	return time.Unix(0, int64(number(f, int(start.UnixNano()), int(end.UnixNano())))).UTC()
+	return time.Unix(0, randInt64Range(f, start.UnixNano(), end.UnixNano())).UTC()
 }
 
 // NanoSecond will generate a random nano second
@@ -163,52 +163,172 @@ func timeZoneOffset(f *Faker) float32 {
 	return float32(value)
 }
 
+// javaToGoTimeTokens are Java date tokens mapped to Go layouts, longest first.
+// Single letters are matched only when they are not part of a word, so Go text
+// such as January, Monday, and PM is left alone.
+var javaToGoTimeTokens = []struct{ java, golang string }{
+	{"zz:zz", "Z07:00"},
+	{"zzzz", "Z0700"},
+	{"yyyy", "2006"},
+	{"MMMM", "January"},
+	{"EEEE", "Monday"},
+	{"SSS", "000"},
+	{"ddd", "_2"},
+	{"MMM", "Jan"},
+	{"HH", "15"},
+	{"hh", "03"},
+	{"mm", "04"},
+	{"ss", "05"},
+	{"yy", "06"},
+	{"aa", "PM"},
+	{"ZZ", "-0700"},
+	{"dd", "02"},
+	{"MM", "01"},
+	{"d", "2"},
+	{"H", "15"},
+	{"h", "3"},
+	{"m", "4"},
+	{"s", "5"},
+	{"y", "06"},
+	{"a", "pm"},
+	{"M", "1"},
+	{"Z", "-07"},
+	{"z", "MST"},
+	{"E", "Mon"},
+}
+
 // javaDateTimeFormatToGolangFormat converts java date/time format into go date/time format
 func javaDateTimeFormatToGolangFormat(format string) string {
-	format = strings.Replace(format, "ddd", "_2", -1)
-	format = strings.Replace(format, "dd", "02", -1)
-	format = strings.Replace(format, "d", "2", -1)
-
-	format = strings.Replace(format, "HH", "15", -1)
-	format = strings.Replace(format, "H", "15", -1)
-
-	format = strings.Replace(format, "hh", "03", -1)
-	format = strings.Replace(format, "h", "3", -1)
-
-	format = strings.Replace(format, "mm", "04", -1)
-	format = strings.Replace(format, "m", "4", -1)
-
-	format = strings.Replace(format, "ss", "05", -1)
-	format = strings.Replace(format, "s", "5", -1)
-
-	format = strings.Replace(format, "yyyy", "2006", -1)
-	format = strings.Replace(format, "yy", "06", -1)
-	format = strings.Replace(format, "y", "06", -1)
-
-	format = strings.Replace(format, "SSS", "000", -1)
-
-	format = strings.Replace(format, "a", "pm", -1)
-	format = strings.Replace(format, "aa", "PM", -1)
-
-	format = strings.Replace(format, "MMMM", "January", -1)
-	format = strings.Replace(format, "MMM", "Jan", -1)
-	format = strings.Replace(format, "MM", "01", -1)
-	format = strings.Replace(format, "M", "1", -1)
-
-	format = strings.Replace(format, "ZZ", "-0700", -1)
-
-	if !strings.Contains(format, "Z07") {
-		format = strings.Replace(format, "Z", "-07", -1)
+	var b strings.Builder
+	b.Grow(len(format))
+	for i := 0; i < len(format); {
+		if format[i] == '\'' {
+			i = appendJavaQuoted(format, i, &b)
+			continue
+		}
+		if tok, repl, ok := matchJavaTimeToken(format, i); ok {
+			b.WriteString(repl)
+			i += len(tok)
+			continue
+		}
+		b.WriteByte(format[i])
+		i++
 	}
+	return b.String()
+}
 
-	format = strings.Replace(format, "zz:zz", "Z07:00", -1)
-	format = strings.Replace(format, "zzzz", "Z0700", -1)
-	format = strings.Replace(format, "z", "MST", -1)
+// appendJavaQuoted copies a Java quoted literal. ” is one apostrophe.
+// i points at the opening quote. The returned index is the first uncopied byte.
+func appendJavaQuoted(format string, i int, b *strings.Builder) int {
+	if i+1 < len(format) && format[i+1] == '\'' {
+		b.WriteByte('\'')
+		return i + 2
+	}
+	i++
+	for i < len(format) {
+		if format[i] == '\'' {
+			if i+1 < len(format) && format[i+1] == '\'' {
+				b.WriteByte('\'')
+				i += 2
+				continue
+			}
+			return i + 1
+		}
+		b.WriteByte(format[i])
+		i++
+	}
+	return i
+}
 
-	format = strings.Replace(format, "EEEE", "Monday", -1)
-	format = strings.Replace(format, "E", "Mon", -1)
+func matchJavaTimeToken(format string, i int) (string, string, bool) {
+	for _, tok := range javaToGoTimeTokens {
+		end := i + len(tok.java)
+		if end > len(format) || format[i:end] != tok.java {
+			continue
+		}
+		// Z07:00 and Z0700 are already Go layouts. A Java Z is an offset.
+		if tok.java == "Z" && end+2 <= len(format) && format[end:end+2] == "07" {
+			continue
+		}
+		if !javaTokenBounded(format, i, end) {
+			continue
+		}
+		return tok.java, tok.golang, true
+	}
+	return "", "", false
+}
 
-	return format
+func javaTokenBounded(format string, start, end int) bool {
+	if start > 0 && isASCIILetter(format[start-1]) {
+		return false
+	}
+	if end < len(format) && isASCIILetter(format[end]) {
+		return false
+	}
+	return true
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// unpaddedTimeFormat rewrites zero-padded numeric layout tokens (01, 02, 03, 04, 05)
+// to the one-or-two-digit forms (1, 2, 3, 4, 5). A token is rewritten only when a
+// separator keeps it from touching neighboring digits, so compact layouts such as
+// 20060102 stay unchanged.
+func unpaddedTimeFormat(format string) (string, bool) {
+	var b strings.Builder
+	b.Grow(len(format))
+	changed := false
+	for i := 0; i < len(format); {
+		if i+2 <= len(format) && separatedZeroPad(format, i) {
+			b.WriteByte(format[i+1])
+			changed = true
+			i += 2
+			continue
+		}
+		b.WriteByte(format[i])
+		i++
+	}
+	if !changed {
+		return "", false
+	}
+	return b.String(), true
+}
+
+// separatedZeroPad reports whether format[i:i+2] is 01, 02, 03, 04, or 05
+// and is not glued to another digit.
+func separatedZeroPad(format string, i int) bool {
+	if format[i] != '0' {
+		return false
+	}
+	switch format[i+1] {
+	case '1', '2', '3', '4', '5':
+	default:
+		return false
+	}
+	if i > 0 && isASCIIDigit(format[i-1]) {
+		return false
+	}
+	if i+2 < len(format) && isASCIIDigit(format[i+2]) {
+		return false
+	}
+	return true
+}
+
+func isASCIIDigit(b byte) bool {
+	return b >= '0' && b <= '9'
+}
+
+// clockOnSafeDay keeps the clock of t. A clock-only layout parses as year 0, and
+// UnixNano of that year does not fit in an int64, so the value wraps and the clock
+// comes back shifted. Move those times onto 2000-01-01. A time UnixNano can already
+// represent is left as it is.
+func clockOnSafeDay(t time.Time) time.Time {
+	if y := t.Year(); y >= 1678 && y <= 2261 {
+		return t
+	}
+	return time.Date(2000, 1, 1, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
 }
 
 func addDateTimeLookup() {
@@ -222,7 +342,7 @@ func addDateTimeLookup() {
 			"date string", "calendar date", "datetime", "timestamp", "chronological reference",
 		},
 		Keywords: []string{
-			"date", "time", "day", "month", "year", "format", "rfc3339", "iso8601", "utc",
+			"time", "day", "month", "year", "format", "rfc3339", "iso8601", "utc",
 		},
 		Params: []Param{
 			{
@@ -331,7 +451,7 @@ func addDateTimeLookup() {
 				return nil, err
 			}
 
-			return DateRange(startDateTime, endDateTime).Format(format), nil
+			return f.DateRange(startDateTime, endDateTime).Format(format), nil
 		},
 	})
 
@@ -375,7 +495,7 @@ func addDateTimeLookup() {
 			"nano", "ns value", "tiny time", "ultra precision", "fractional second",
 		},
 		Keywords: []string{
-			"nanosecond", "time", "unit", "second", "billionth", "ultra", "high", "resolution",
+			"time", "unit", "second", "billionth", "ultra", "high", "resolution",
 		},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) { return nanoSecond(f), nil },
 	})
@@ -390,7 +510,7 @@ func addDateTimeLookup() {
 			"second value", "sec unit", "time second", "sixtieth minute", "time slice",
 		},
 		Keywords: []string{
-			"second", "time", "unit", "minute", "sixtieth", "duration", "interval", "sixty",
+			"time", "unit", "minute", "sixtieth", "duration", "interval", "sixty",
 		},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) { return second(f), nil },
 	})
@@ -405,7 +525,7 @@ func addDateTimeLookup() {
 			"minute value", "time minute", "sixty seconds", "short period", "clock minute",
 		},
 		Keywords: []string{
-			"minute", "time", "unit", "60", "seconds", "duration", "interval", "sixtieth", "hour",
+			"time", "unit", "60", "seconds", "duration", "interval", "sixtieth", "hour",
 		},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) { return minute(f), nil },
 	})
@@ -420,7 +540,7 @@ func addDateTimeLookup() {
 			"hour value", "time hour", "sixty minutes", "clock hour", "time period",
 		},
 		Keywords: []string{
-			"hour", "time", "unit", "60", "minutes", "duration", "interval", "day",
+			"time", "unit", "60", "minutes", "duration", "interval", "day",
 		},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) { return hour(f), nil },
 	})
@@ -435,7 +555,7 @@ func addDateTimeLookup() {
 			"calendar day", "day value", "earth rotation", "daily unit", "full day",
 		},
 		Keywords: []string{
-			"day", "time", "unit", "axis", "24-hour", "calendar", "sunrise", "sunset",
+			"time", "unit", "axis", "24-hour", "calendar", "sunrise", "sunset",
 		},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) { return day(f), nil },
 	})
@@ -450,7 +570,7 @@ func addDateTimeLookup() {
 			"weekday name", "business day", "work day", "monday to friday", "weekday label",
 		},
 		Keywords: []string{
-			"weekday", "day", "week", "workday", "business", "calendar", "monday", "tuesday", "wednesday", "thursday", "friday",
+			"day", "week", "workday", "business", "calendar", "monday", "tuesday", "wednesday", "thursday", "friday",
 		},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) { return weekDay(f), nil },
 	})
@@ -465,7 +585,7 @@ func addDateTimeLookup() {
 			"calendar month", "month value", "monthly unit", "date month", "time month",
 		},
 		Keywords: []string{
-			"month", "year", "time", "30", "31", "days", "calendar", "period",
+			"year", "time", "30", "31", "days", "calendar", "period",
 		},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) { return month(f), nil },
 	})
@@ -495,7 +615,7 @@ func addDateTimeLookup() {
 			"calendar year", "annual period", "orbit year", "year value", "fiscal year",
 		},
 		Keywords: []string{
-			"year", "time", "365", "days", "leap", "calendar", "decade", "century",
+			"time", "365", "days", "leap", "calendar", "decade", "century",
 		},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) { return year(f), nil },
 	})
@@ -510,7 +630,7 @@ func addDateTimeLookup() {
 			"time zone", "tz name", "standard time zone", "geographic zone", "regional time",
 		},
 		Keywords: []string{
-			"timezone", "time", "earth", "utc", "gmt", "pst", "est", "cst", "mst", "dst",
+			"time", "earth", "utc", "gmt", "pst", "est", "cst", "mst", "dst",
 		},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) { return timeZone(f), nil },
 	})
@@ -525,7 +645,7 @@ func addDateTimeLookup() {
 			"timezone abbr", "tz short code", "abbreviated zone", "short tz name", "zone abbreviation",
 		},
 		Keywords: []string{
-			"timezone", "time", "3-letter", "kst", "pst", "est", "gmt", "utc",
+			"time", "3-letter", "kst", "pst", "est", "gmt", "utc",
 		},
 		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) { return timeZoneAbv(f), nil },
 	})
@@ -585,7 +705,7 @@ func addDateTimeLookup() {
 			"time string", "clock time", "time format", "time value", "hour minute second",
 		},
 		Keywords: []string{
-			"time", "clock", "hour", "minute", "second", "format", "24-hour", "12-hour", "am", "pm",
+			"clock", "hour", "minute", "second", "format", "24-hour", "12-hour", "am", "pm",
 		},
 		Params: []Param{
 			{
@@ -682,14 +802,12 @@ func addDateTimeLookup() {
 			}
 
 			// Generate random time between start and end
+			start = clockOnSafeDay(start)
+			end = clockOnSafeDay(end)
 			startNano := start.UnixNano()
 			endNano := end.UnixNano()
 
-			if startNano > endNano {
-				startNano, endNano = endNano, startNano
-			}
-
-			randomNano := int64(number(f, int(startNano), int(endNano)))
+			randomNano := randInt64Range(f, startNano, endNano)
 			randomTime := time.Unix(0, randomNano).UTC()
 
 			return randomTime.Format(golangFormat), nil

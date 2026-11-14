@@ -55,7 +55,9 @@ const templateMarkdown = `
 
 *Author: {{FirstName}} {{LastName}}*
 
-{{Paragraph 2 5 7 "\n\n"}}
+{{Paragraph}}
+
+{{Paragraph}}
 
 ## Table of Contents
 - [Installation](#installation)
@@ -119,7 +121,11 @@ Dear {{LastName}},
 
 {{RandomString (SliceString "I trust this email finds you well." "I hope you're doing great." "Hoping this message reaches you in good spirits.")}} {{RandomString (SliceString  "Wishing you a fantastic day!" "May your week be filled with joy." "Sending good vibes your way.")}}
 
-{{Paragraph 3 5 10 "\n\n"}}
+{{Paragraph}}
+
+{{Paragraph}}
+
+{{Paragraph}}
 
 {{RandomString (SliceString "I would appreciate your thoughts on" "I'm eager to hear your feedback on" "I'm curious to know what you think about")}} it. If you have a moment, please feel free to check out the project on {{RandomString (SliceString "GitHub" "GitLab" "Bitbucket")}}
 
@@ -193,7 +199,7 @@ func templateFuncMap(f *Faker, fm *template.FuncMap) *template.FuncMap {
 	funcMap["IntRange"] = func(start, end int) []int {
 		n := end - start + 1
 		result := make([]int, n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			result[i] = start + i
 		}
 		return result
@@ -346,7 +352,7 @@ Markus Moen`,
 			"document template", "layout", "blueprint", "design pattern", "text template", "generator", "format schema",
 		},
 		Keywords: []string{
-			"template", "generates", "format", "structure", "engine", "document", "pattern", "design", "syntax", "render", "compile",
+			"generates", "format", "structure", "engine", "document", "pattern", "design", "syntax", "render", "compile",
 		},
 		Params: []Param{
 			{Field: "template", Display: "Template", Type: "string", Description: "Golang template to generate the document from"},

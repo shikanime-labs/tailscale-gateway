@@ -7,6 +7,7 @@ import (
 	"math"
 	"regexp/syntax"
 	"strings"
+	"unicode/utf8"
 )
 
 // Generate fake information from given string.
@@ -47,83 +48,76 @@ func generate(f *Faker, dataVal string) (string, error) {
 	dataVal = replaceWithLetters(f, dataVal)
 
 	// Check if string has any replaceable values
-	// Even if it doesnt its ok we will just return the string
-	if !strings.Contains(dataVal, "{") && !strings.Contains(dataVal, "}") {
+	if !strings.Contains(dataVal, "{") {
 		return dataVal, nil
 	}
 
-	// Variables to identify the index in which it exists
-	startCurly := -1
-	startCurlyIgnore := []int{}
-	endCurly := -1
-	endCurlyIgnore := []int{}
+	var result strings.Builder
+	result.Grow(len(dataVal) * 2) // Pre-allocate with estimate
 
-	// Loop through string characters
-	for i := 0; i < len(dataVal); i++ {
-		// Check for ignores if equal skip
-		shouldSkip := false
-		for _, igs := range startCurlyIgnore {
-			if i == igs {
-				shouldSkip = true
+	i := 0
+	for i < len(dataVal) {
+		// Find next opening brace
+		start := strings.IndexByte(dataVal[i:], '{')
+		if start == -1 {
+			// No more replacements, append rest and break
+			result.WriteString(dataVal[i:])
+			break
+		}
+		start += i
+
+		// Append everything before the brace
+		result.WriteString(dataVal[i:start])
+
+		// Find matching closing brace (handle nested brackets)
+		end := -1
+		depth := 0
+		for j := start; j < len(dataVal); j++ {
+			if dataVal[j] == '{' {
+				depth++
+			} else if dataVal[j] == '}' {
+				depth--
+				if depth == 0 {
+					end = j
+					break
+				}
 			}
 		}
-		for _, ige := range endCurlyIgnore {
-			if i == ige {
-				shouldSkip = true
-			}
-		}
-		if shouldSkip {
-			continue
+
+		if end == -1 {
+			// No closing brace, append rest and break
+			result.WriteString(dataVal[start:])
+			break
 		}
 
-		// Identify items between brackets. Ex: {firstname}
-		if string(dataVal[i]) == "{" {
-			startCurly = i
-			continue
-		}
-		if startCurly != -1 && string(dataVal[i]) == "}" {
-			endCurly = i
-		}
-		if startCurly == -1 || endCurly == -1 {
-			continue
-		}
+		// Extract function name and params
+		fParts := dataVal[start+1 : end]
+		fName, fParams, _ := strings.Cut(fParts, ":")
 
-		// Get the value between brackets
-		fParts := dataVal[startCurly+1 : endCurly]
-
-		// Check if has params separated by :
-		fNameSplit := strings.SplitN(fParts, ":", 2)
-		fName := ""
-		fParams := ""
-		if len(fNameSplit) >= 1 {
-			fName = fNameSplit[0]
-		}
-		if len(fNameSplit) >= 2 {
-			fParams = fNameSplit[1]
-		}
-
-		// Check to see if its a replaceable lookup function
+		// Check if it's a replaceable lookup function
 		if info := GetFuncLookup(fName); info != nil {
-			// Get parameters, make sure params and the split both have values
-			mapParams := NewMapParams()
+			// Get parameters
+			var mapParams *MapParams
 			paramsLen := len(info.Params)
 
-			// If just one param and its a string simply just pass it
-			if paramsLen == 1 && info.Params[0].Type == "string" {
-				mapParams.Add(info.Params[0].Field, fParams)
-			} else if paramsLen > 0 && fParams != "" {
-				var err error
-				splitVals, err := funcLookupSplit(fParams)
-				if err != nil {
-					return "", err
+			if paramsLen > 0 && fParams != "" {
+				mapParams = NewMapParams()
+				// If just one param and its a string simply just pass it
+				if paramsLen == 1 && info.Params[0].Type == "string" {
+					mapParams.Add(info.Params[0].Field, fParams)
+				} else {
+					splitVals, err := funcLookupSplit(fParams)
+					if err != nil {
+						return "", err
+					}
+					mapParams, err = addSplitValsToMapParams(splitVals, info, mapParams)
+					if err != nil {
+						return "", err
+					}
 				}
-				mapParams, err = addSplitValsToMapParams(splitVals, info, mapParams)
-				if err != nil {
-					return "", err
+				if mapParams.Size() == 0 {
+					mapParams = nil
 				}
-			}
-			if mapParams.Size() == 0 {
-				mapParams = nil
 			}
 
 			// Call function
@@ -132,30 +126,17 @@ func generate(f *Faker, dataVal string) (string, error) {
 				return "", err
 			}
 
-			// Successfully found, run replace with new value
-			dataVal = strings.Replace(dataVal, "{"+fParts+"}", fmt.Sprintf("%v", fValue), 1)
-
-			// Reset the curly index back to -1 and reset ignores
-			startCurly = -1
-			startCurlyIgnore = []int{}
-			endCurly = -1
-			endCurlyIgnore = []int{}
-			i = -1 // Reset back to the start of the string
-			continue
+			// Write the generated value
+			result.WriteString(fmt.Sprintf("%v", fValue))
+			i = end + 1
+		} else {
+			// Not a valid function, keep the braces
+			result.WriteString(dataVal[start : end+1])
+			i = end + 1
 		}
-
-		// Couldnt find anything - mark curly brackets to skip and rerun
-		startCurlyIgnore = append(startCurlyIgnore, startCurly)
-		endCurlyIgnore = append(endCurlyIgnore, endCurly)
-
-		// Reset the curly index back to -1
-		startCurly = -1
-		endCurly = -1
-		i = -1 // Reset back to the start of the string
-		continue
 	}
 
-	return dataVal, nil
+	return result.String(), nil
 }
 
 // FixedWidthOptions defines values needed for csv generation
@@ -290,13 +271,43 @@ func regex(f *Faker, regexStr string) (gen string) {
 	// Panic catch
 	defer func() {
 		if r := recover(); r != nil {
-			gen = fmt.Sprint(f)
+			gen = fmt.Sprint(r)
 			return
 
 		}
 	}()
 
-	return regexGenerate(f, re, len(regexStr)*100)
+	// The limit has to hold the shortest match, a{1000} is 1000 characters from 7 of the pattern
+	limit := max(len(regexStr)*100, regexMinLength(re)*utf8.UTFMax)
+	return regexGenerate(f, re, limit)
+}
+
+// regexMinLength is the number of characters in the shortest string that the regexp matches
+func regexMinLength(re *syntax.Regexp) int {
+	switch re.Op {
+	case syntax.OpLiteral:
+		return len(re.Rune)
+	case syntax.OpCharClass, syntax.OpAnyCharNotNL, syntax.OpAnyChar:
+		return 1
+	case syntax.OpCapture, syntax.OpPlus:
+		return regexMinLength(re.Sub[0])
+	case syntax.OpRepeat:
+		return re.Min * regexMinLength(re.Sub[0])
+	case syntax.OpConcat:
+		sum := 0
+		for _, sub := range re.Sub {
+			sum += regexMinLength(sub)
+		}
+		return sum
+	case syntax.OpAlternate:
+		shortest := regexMinLength(re.Sub[0])
+		for _, sub := range re.Sub[1:] {
+			shortest = min(shortest, regexMinLength(sub))
+		}
+		return shortest
+	}
+
+	return 0
 }
 
 func regexGenerate(f *Faker, re *syntax.Regexp, limit int) string {
@@ -330,7 +341,7 @@ func regexGenerate(f *Faker, re *syntax.Regexp, limit int) string {
 		// pick random char in range (inverse match group)
 		if sum == -1 {
 			chars := []uint8{}
-			for j := 0; j < len(allStr); j++ {
+			for j := range len(allStr) {
 				c := allStr[j]
 
 				// Check c in range
@@ -498,7 +509,7 @@ func addGenerateLookup() {
 			"macro resolver",
 		},
 		Keywords: []string{
-			"generate", "upon", "datasets", "random",
+			"upon", "datasets", "random",
 			"string", "value", "available", "data",
 			"sets", "based",
 		},
@@ -590,7 +601,7 @@ Lura Lockman       zacherykuhic@feil.name         S8gV7Z64KlHG     12`,
 			"rule evaluator",
 		},
 		Keywords: []string{
-			"regex", "strings", "re2", "syntax",
+			"strings", "re2", "syntax",
 			"pattern-matching", "tool", "search",
 			"validation", "compile", "replace",
 		},
@@ -634,7 +645,7 @@ Lura Lockman       zacherykuhic@feil.name         S8gV7Z64KlHG     12`,
 			"object store",
 		},
 		Keywords: []string{
-			"map", "stores", "key", "value",
+			"stores", "key", "value",
 			"dictionary", "hash", "collection",
 			"pairs", "keys", "values", "structure",
 		},

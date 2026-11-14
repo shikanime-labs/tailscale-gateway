@@ -146,7 +146,7 @@ type Foo struct {
 	Int           int
 	Pointer       *int
 	Name          string         `fake:"{firstname}"`         // Any available function all lowercase
-	Sentence      string         `fake:"{sentence:3}"`        // Can call with parameters
+	Sentence      string         `fake:"{sentence}"`          
 	RandStr       string         `fake:"{randomstring:[hello,world]}"`
 	Number        string         `fake:"{number:1,10}"`       // Comma separated for multiple values
 	Regex         string         `fake:"{regex:[abcdef]{5}}"` // Generate string from regex
@@ -157,7 +157,7 @@ type Foo struct {
 	Skip          *string        `fake:"skip"`                // Set to "skip" to not generate data for
 	SkipAlt       *string        `fake:"-"`                   // Set to "-" to not generate data for
 	Created       time.Time                                   // Can take in a fake tag as well as a format tag
-	CreatedFormat time.Time      `fake:"{year}-{month}-{day}" format:"2006-01-02"`
+	CreatedFormat time.Time      `fake:"{date:2006-01-02}" format:"2006-01-02"`
 }
 
 type Bar struct {
@@ -390,6 +390,13 @@ EmailText(co *EmailOptions) (string, error)
 FixedWidth(co *FixedWidthOptions) (string, error)
 ```
 
+### ID
+
+```go
+ID() string
+UUID() string
+```
+
 ### Product
 
 ```go
@@ -420,8 +427,13 @@ FirstName() string
 MiddleName() string
 LastName() string
 Gender() string
+Age() int
+Ethnicity() string
 SSN() string
+EIN() string
 Hobby() string
+SocialMedia() string
+Bio() string
 Contact() *ContactInfo
 Email() string
 Phone() string
@@ -437,6 +449,12 @@ Slice(v any)
 Map() map[string]any
 Generate(value string) string
 Regex(value string) string
+```
+
+### Database
+
+```go
+SQL(so *SQLOptions) (string, error)
 ```
 
 ### Auth
@@ -466,6 +484,18 @@ Latitude() float64
 LatitudeInRange(min, max float64) (float64, error)
 Longitude() float64
 LongitudeInRange(min, max float64) (float64, error)
+```
+
+### Airline
+
+```go
+AirlineAircraftType() string
+AirlineAirplane() string
+AirlineAirport() string
+AirlineAirportIATA() string
+AirlineFlightNumber() string
+AirlineRecordLocator() string
+AirlineSeat() string
 ```
 
 ### Game
@@ -512,12 +542,16 @@ NounCollectiveAnimal() string
 NounCollectiveThing() string
 NounCountable() string
 NounUncountable() string
+NounProper() string
+NounDeterminer() string
 
 // Verbs
 Verb() string
 VerbAction() string
 VerbLinking() string
 VerbHelping() string
+VerbTransitive() string
+VerbIntransitive() string
 
 // Adverbs
 Adverb() string
@@ -554,6 +588,7 @@ PronounReflective() string
 PronounDemonstrative() string
 PronounInterrogative() string
 PronounRelative() string
+PronounIndefinite() string
 
 // Connectives
 Connective() string
@@ -566,16 +601,22 @@ ConnectiveExamplify() string
 
 // Words
 Word() string
+Interjection() string
 
-// Sentences
-Sentence(wordCount int) string
-Paragraph(paragraphCount int, sentenceCount int, wordCount int, separator string) string
+// Text
+Sentence() string
+Paragraph() string
 LoremIpsumWord() string
 LoremIpsumSentence(wordCount int) string
 LoremIpsumParagraph(paragraphCount int, sentenceCount int, wordCount int, separator string) string
 Question() string
 Quote() string
 Phrase() string
+PhraseNoun() string
+PhraseVerb() string
+PhraseAdverb() string
+PhrasePreposition() string
+Comment() string
 ```
 
 ### Foods
@@ -588,13 +629,13 @@ Lunch() string
 Dinner() string
 Snack() string
 Dessert() string
+Drink() string
 ```
 
 ### Misc
 
 ```go
 Bool() bool
-UUID() string
 Weighted(options []any, weights []float32) (any, error)
 FlipACoin() string
 RandomMapKey(mapI any) any
@@ -607,6 +648,7 @@ ShuffleAnySlice(v any)
 Color() string
 HexColor() string
 RGBColor() []int
+HSLColor() []int
 SafeColor() string
 NiceColors() string
 ```
@@ -623,6 +665,7 @@ ImagePng(width int, height int) []byte
 
 ```go
 URL() string
+UrlSlug(words int) string
 DomainName() string
 DomainSuffix() string
 IPv4Address() string
@@ -638,6 +681,7 @@ ChromeUserAgent() string
 FirefoxUserAgent() string
 OperaUserAgent() string
 SafariUserAgent() string
+APIUserAgent() string
 ```
 
 ### HTML
@@ -717,7 +761,7 @@ Slogan() string
 ```go
 HackerAbbreviation() string
 HackerAdjective() string
-Hackeringverb() string
+HackeringVerb() string
 HackerNoun() string
 HackerPhrase() string
 HackerVerb() string
@@ -727,8 +771,8 @@ HackerVerb() string
 
 ```go
 HipsterWord() string
-HipsterSentence(wordCount int) string
-HipsterParagraph(paragraphCount int, sentenceCount int, wordCount int, separator string) string
+HipsterSentence() string
+HipsterParagraph() string
 ```
 
 ### App
@@ -755,10 +799,29 @@ Bird() string
 
 ```go
 Emoji() string
-EmojiDescription() string
 EmojiCategory() string
 EmojiAlias() string
 EmojiTag() string
+EmojiFlag() string
+EmojiAnimal() string
+EmojiFood() string
+EmojiPlant() string
+EmojiMusic() string
+EmojiVehicle() string
+EmojiSport() string
+EmojiFace() string
+EmojiHand() string
+EmojiClothing() string
+EmojiLandmark() string
+EmojiElectronics() string
+EmojiGame() string
+EmojiTools() string
+EmojiWeather() string
+EmojiJob() string
+EmojiPerson() string
+EmojiGesture() string
+EmojiCostume() string
+EmojiSentence() string
 ```
 
 ### Language
@@ -766,8 +829,8 @@ EmojiTag() string
 ```go
 Language() string
 LanguageAbbreviation() string
+LanguageBCP() string
 ProgrammingLanguage() string
-ProgrammingLanguageBest() string
 ```
 
 ### Number
@@ -780,18 +843,21 @@ Int8() int8
 Int16() int16
 Int32() int32
 Int64() int64
+IntRange(min, max int) int
 Uint() uint
 UintN(n uint) uint
 Uint8() uint8
 Uint16() uint16
 Uint32() uint32
 Uint64() uint64
+UintRange(min, max uint) uint
 Float32() float32
 Float32Range(min, max float32) float32
 Float64() float64
 Float64Range(min, max float64) float64
 ShuffleInts(a []int)
 RandomInt(i []int) int
+RandomUint(u []uint) uint
 HexUint(bitsize int) string
 ```
 
@@ -802,6 +868,7 @@ Digit() string
 DigitN(n uint) string
 Letter() string
 LetterN(n uint) string
+Vowel() string
 Lexify(str string) string
 Numerify(str string) string
 ShuffleStrings(a []string)
@@ -860,13 +927,14 @@ MovieGenre() string
 
 ```go
 Error() error
+ErrorObject() error
 ErrorDatabase() error
 ErrorGRPC() error
 ErrorHTTP() error
 ErrorHTTPClient() error
 ErrorHTTPServer() error
-ErrorInput() error
 ErrorRuntime() error
+ErrorValidation() error
 ```
 
 ### School

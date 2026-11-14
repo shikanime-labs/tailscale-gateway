@@ -1,8 +1,9 @@
 package gofakeit
 
 import (
-	"encoding/hex"
+	"fmt"
 	"reflect"
+	"sort"
 
 	"github.com/brianvoe/gofakeit/v7/data"
 )
@@ -14,43 +15,6 @@ func Bool() bool { return boolFunc(GlobalFaker) }
 func (f *Faker) Bool() bool { return boolFunc(f) }
 
 func boolFunc(f *Faker) bool { return randIntRange(f, 0, 1) == 1 }
-
-// UUID (version 4) will generate a random unique identifier based upon random numbers
-// Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-func UUID() string { return uuid(GlobalFaker) }
-
-// UUID (version 4) will generate a random unique identifier based upon random numbers
-// Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx 8-4-4-4-12
-func (f *Faker) UUID() string { return uuid(f) }
-
-func uuid(f *Faker) string {
-	version := byte(4)
-	uuid := make([]byte, 16)
-
-	// Read 16 random bytes
-	for i := 0; i < 16; i++ {
-		uuid[i] = byte(f.IntN(256))
-	}
-
-	// Set version
-	uuid[6] = (uuid[6] & 0x0f) | (version << 4)
-
-	// Set variant
-	uuid[8] = (uuid[8] & 0xbf) | 0x80
-
-	buf := make([]byte, 36)
-	hex.Encode(buf[0:8], uuid[0:4])
-	buf[8] = dash
-	hex.Encode(buf[9:13], uuid[4:6])
-	buf[13] = dash
-	hex.Encode(buf[14:18], uuid[6:8])
-	buf[18] = dash
-	hex.Encode(buf[19:23], uuid[8:10])
-	buf[23] = dash
-	hex.Encode(buf[24:], uuid[10:])
-
-	return string(buf)
-}
 
 // ShuffleAnySlice takes in a slice and outputs it in a random order
 func ShuffleAnySlice(v any) { shuffleAnySlice(GlobalFaker, v) }
@@ -112,7 +76,44 @@ func (f *Faker) RandomMapKey(mapI any) any { return randomMapKey(f, mapI) }
 
 func randomMapKey(f *Faker, mapI any) any {
 	keys := reflect.ValueOf(mapI).MapKeys()
+
+	// A map is read in a random order, sort the keys so the same seed picks the same key
+	sort.Slice(keys, func(i, j int) bool { return lessMapKey(keys[i], keys[j]) })
+
 	return keys[f.IntN(len(keys))].Interface()
+}
+
+// lessMapKey orders strings, integers and floats by value, and any other key by its printed form
+func lessMapKey(a, b reflect.Value) bool {
+	// The keys of a map[any]T hold their value in an interface
+	if a.Kind() == reflect.Interface {
+		a = a.Elem()
+	}
+	if b.Kind() == reflect.Interface {
+		b = b.Elem()
+	}
+
+	// A nil interface key unwraps to an invalid Value, and Type panics on it. Nil sorts first.
+	if !a.IsValid() || !b.IsValid() {
+		return !a.IsValid() && b.IsValid()
+	}
+
+	// Keys of different types, like 1 and "1" in a map[any]T, are ordered by type first
+	if a.Type() != b.Type() {
+		return a.Type().String() < b.Type().String()
+	}
+
+	switch a.Kind() {
+	case reflect.String:
+		return a.String() < b.String()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return a.Int() < b.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return a.Uint() < b.Uint()
+	case reflect.Float32, reflect.Float64:
+		return a.Float() < b.Float()
+	}
+	return fmt.Sprint(a.Interface()) < fmt.Sprint(b.Interface())
 }
 
 // Categories will return a map string array of available data categories and sub categories
@@ -129,19 +130,6 @@ func Categories() map[string][]string {
 }
 
 func addMiscLookup() {
-	AddFuncLookup("uuid", Info{
-		Display:     "UUID",
-		Category:    "misc",
-		Description: "128-bit identifier used to uniquely identify objects or entities in computer systems",
-		Example:     "590c1440-9888-45b0-bd51-a817ee07c3f2",
-		Output:      "string",
-		Aliases:     []string{"identifier", "unique", "guid", "id", "128-bit"},
-		Keywords:    []string{"uuid", "computer", "system", "objects", "entities", "identify", "version", "hexadecimal"},
-		Generate: func(f *Faker, m *MapParams, info *Info) (any, error) {
-			return uuid(f), nil
-		},
-	})
-
 	AddFuncLookup("bool", Info{
 		Display:     "Boolean",
 		Category:    "misc",

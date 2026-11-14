@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"reflect"
+	"sort"
 )
 
 // XMLOptions defines values needed for json generation
@@ -60,17 +61,20 @@ func xmlMapLoop(e *xml.Encoder, m *xmlMap) error {
 	// Check if xmlmap has key order if not create it
 	// Get key order by order of fields array
 	if m.KeyOrder == nil {
-		m.KeyOrder = make([]string, len(m.Map))
+		m.KeyOrder = make([]string, 0, len(m.Map))
 		for k := range m.Map {
 			m.KeyOrder = append(m.KeyOrder, k)
 		}
+
+		// A map is read in a random order, sort the keys so the same seed gives the same xml
+		sort.Strings(m.KeyOrder)
 	}
 
 	for _, key := range m.KeyOrder {
 		v := reflect.ValueOf(m.Map[key])
 
 		// Always get underlyning Value of value
-		if v.Kind() == reflect.Ptr {
+		if v.Kind() == reflect.Pointer {
 			v = reflect.Indirect(v)
 		}
 
@@ -292,7 +296,7 @@ func addFileXMLLookup() {
 			"serialized tree",
 		},
 		Keywords: []string{
-			"xml", "extensible", "markup", "language", "elements", "format",
+			"extensible", "markup", "language", "elements", "format",
 			"structured", "generates", "tags", "attributes", "nested",
 		},
 		Params: []Param{
