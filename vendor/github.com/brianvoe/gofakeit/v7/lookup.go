@@ -1,6 +1,7 @@
 package gofakeit
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -157,17 +158,29 @@ func (m *MapParams) Size() int {
 
 // UnmarshalJSON will unmarshal the json into the []string
 func (m *MapParamsValue) UnmarshalJSON(data []byte) error {
+	// Read numbers as json.Number so 1000000 stays 1000000, as a float64 it would print as 1e+06
+	decode := func(v any) error {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.UseNumber()
+		return dec.Decode(v)
+	}
+
 	// check if the data is an array
 	// if so, marshal it into m
 	if data[0] == '[' {
 		var values []any
-		err := json.Unmarshal(data, &values)
+		err := decode(&values)
 		if err != nil {
 			return err
 		}
 
 		// convert the values to array of strings
 		for _, value := range values {
+			// null is no value, reflect.TypeOf(nil) would panic below
+			if value == nil {
+				continue
+			}
+
 			typeOf := reflect.TypeOf(value).Kind().String()
 
 			if typeOf == "map" {
@@ -177,7 +190,7 @@ func (m *MapParamsValue) UnmarshalJSON(data []byte) error {
 				}
 				*m = append(*m, string(v))
 			} else {
-				*m = append(*m, fmt.Sprintf("%v", value))
+				*m = append(*m, mapParamsValueString(value))
 			}
 		}
 		return nil
@@ -185,12 +198,38 @@ func (m *MapParamsValue) UnmarshalJSON(data []byte) error {
 
 	// if not, then convert into a string and add it to m
 	var s any
-	if err := json.Unmarshal(data, &s); err != nil {
+	if err := decode(&s); err != nil {
 		return err
 	}
 
-	*m = append(*m, fmt.Sprintf("%v", s))
+	// null is no value, instead of the string "<nil>"
+	if s == nil {
+		return nil
+	}
+
+	*m = append(*m, mapParamsValueString(s))
 	return nil
+}
+
+// mapParamsValueString turns a decoded json value into the string a param getter can parse
+func mapParamsValueString(v any) string {
+	n, ok := v.(json.Number)
+	if !ok {
+		return fmt.Sprintf("%v", v)
+	}
+
+	// A whole number keeps the digits it was written with, so large ints stay exact
+	s := n.String()
+	if !strings.ContainsAny(s, ".eE") {
+		return s
+	}
+
+	// 1.0 becomes 1 and 1e3 becomes 1000, without an exponent like 1e+06
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return s
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
 func GetRandomSimpleFunc(f *Faker) (string, Info) {
@@ -341,10 +380,13 @@ func (i *Info) GetField(m *MapParams, field string) (*Param, []string, error) {
 	// Get value from map
 	if m != nil {
 		value, ok := (*m)[field]
-		if !ok {
+
+		// A param without a value (null or []) is not given either, the getters read value[0].
+		// For a list [] is an empty list.
+		if !ok || (len(value) == 0 && !strings.HasPrefix(p.Type, "[")) {
 			// If default isnt empty use default
 			if p.Default != "" {
-				return p, []string{p.Default}, nil
+				return p, paramDefault(p), nil
 			}
 
 			return nil, nil, fmt.Errorf("could not find field: %s", field)
@@ -352,22 +394,25 @@ func (i *Info) GetField(m *MapParams, field string) (*Param, []string, error) {
 
 		return p, value, nil
 	} else if p.Default != "" {
-		// If p.Type is []uint, then we need to convert it to []string
-		if strings.HasPrefix(p.Default, "[") {
-			// Remove [] from type
-			defaultClean := p.Default[1 : len(p.Default)-1]
-
-			// Split on comma
-			defaultSplit := strings.Split(defaultClean, ",")
-
-			return p, defaultSplit, nil
-		}
-
 		// If default isnt empty use default
-		return p, []string{p.Default}, nil
+		return p, paramDefault(p), nil
 	}
 
 	return nil, nil, fmt.Errorf("could not find field: %s", field)
+}
+
+// paramDefault returns the default of a param as a list of values
+func paramDefault(p *Param) []string {
+	// If p.Type is []uint, then we need to convert it to []string
+	if strings.HasPrefix(p.Default, "[") {
+		// Remove [] from type
+		defaultClean := p.Default[1 : len(p.Default)-1]
+
+		// Split on comma
+		return strings.Split(defaultClean, ",")
+	}
+
+	return []string{p.Default}
 }
 
 // GetBool will retrieve boolean field from data
