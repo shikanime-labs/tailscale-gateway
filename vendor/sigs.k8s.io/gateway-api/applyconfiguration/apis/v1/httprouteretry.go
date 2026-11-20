@@ -24,10 +24,78 @@ import (
 
 // HTTPRouteRetryApplyConfiguration represents a declarative configuration of the HTTPRouteRetry type for use
 // with apply.
+//
+// HTTPRouteRetry defines retry configuration for an HTTPRoute.
+//
+// Implementations SHOULD retry when a retry stanza is configured and the
+// connection could not be established (e.g., connect timeout, connection
+// refused, TLS handshake failure), or the backend explicitly rejected the
+// request before processing it (e.g., HTTP/2 REFUSED_STREAM, gRPC UNAVAILABLE)
+//
+// Implementations SHOULD NOT retry by default on failures where the request
+// may have been processed (e.g., a connection reset after the request was
+// sent). Implementations that do retry on such conditions MUST clearly
+// document this behavior, as it is unsafe for non-idempotent requests.
 type HTTPRouteRetryApplyConfiguration struct {
-	Codes    []apisv1.HTTPRouteRetryStatusCode `json:"codes,omitempty"`
-	Attempts *int                              `json:"attempts,omitempty"`
-	Backoff  *apisv1.Duration                  `json:"backoff,omitempty"`
+	// Codes defines the HTTP response status codes for which a backend request
+	// should be retried.
+	//
+	// Support: Extended
+	//
+	Codes []apisv1.HTTPRouteRetryStatusCode `json:"codes,omitempty"`
+	// Attempts specifies the maximum number of times an individual request
+	// from the Gateway to a backend should be retried in addition to the
+	// initial request.
+	//
+	// If the maximum number of retries has been attempted without a successful
+	// response from the backend, the Gateway MUST return an error.
+	//
+	// An explicit zero value MUST disable retries.
+	//
+	// Support: Extended
+	//
+	Attempts *int `json:"attempts,omitempty"`
+	// Backoff specifies the base interval for a backoff strategy between
+	// retry attempts and is represented in Gateway API Duration formatting.
+	// The duration a Gateway waits before a retry attempt is determined
+	// by the base interval and the implementation's retry strategy.
+	//
+	// Implementations MAY add random jitter and MAY cap the delay at an
+	// implementation-defined maximum, which SHOULD NOT be less than the base
+	// interval. The precise backoff curve and jitter calculation are
+	// implementation-specific and not exposed in the Gateway API specification.
+	// Implementations typically apply exponential backoff with jitter to
+	// mitigate thundering-herd issues.
+	//
+	// If a Request timeout (`rules[].timeouts.request`) is configured on the
+	// route, the entire duration of the initial request and any retry attempts
+	// MUST not exceed the Request timeout duration. If any retry attempts are
+	// still in progress when the Request timeout duration has been reached,
+	// these SHOULD be canceled if possible and the Gateway MUST immediately
+	// return a timeout error.
+	//
+	// If a BackendRequest timeout (`rules[].timeouts.backendRequest`) is
+	// configured on the route, any retry attempts which reach the configured
+	// BackendRequest timeout duration without a response SHOULD be canceled if
+	// possible and the Gateway SHOULD schedule the next retry attempt according
+	// to the configured backoff.
+	//
+	// If a BackendRequest timeout is _not_ configured on the route, retry
+	// attempts MAY time out after an implementation default duration, or MAY
+	// remain pending until a configured Request timeout or implementation
+	// default duration for total request time is reached.
+	//
+	// When this field is unspecified, the backoff strategy and base interval
+	// are implementation-specific.
+	//
+	// Implementations which retry immediately with no backoff MUST NOT advertise
+	// support for this field and MUST set the Accepted Condition for the Route
+	// to `status: False` with a Reason of `UnsupportedValue` when this field is
+	// set.
+	//
+	// Support: Implementation-specific
+	//
+	Backoff *apisv1.Duration `json:"backoff,omitempty"`
 }
 
 // HTTPRouteRetryApplyConfiguration constructs a declarative configuration of the HTTPRouteRetry type for use with

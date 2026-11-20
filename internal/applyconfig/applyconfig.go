@@ -14,7 +14,7 @@ import (
 // OwnerReference returns a typed OwnerReference pointing to the provided Gateway.
 func OwnerReference(gw *gatewayv1.Gateway) *applymetav1.OwnerReferenceApplyConfiguration {
 	return applymetav1.OwnerReference().
-		WithAPIVersion(gatewayv1.SchemeGroupVersion.String()).
+		WithAPIVersion(gatewayv1.GroupVersion.String()).
 		WithKind("Gateway").
 		WithName(gw.Name).
 		WithUID(gw.UID)

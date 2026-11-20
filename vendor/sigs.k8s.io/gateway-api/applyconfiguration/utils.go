@@ -108,6 +108,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apisv1.GRPCRouteSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("GRPCRouteStatus"):
 		return &apisv1.GRPCRouteStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("HeaderConfig"):
+		return &apisv1.HeaderConfigApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("HTTPAuthConfig"):
 		return &apisv1.HTTPAuthConfigApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("HTTPBackendRef"):
@@ -152,8 +154,22 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apisv1.HTTPURLRewriteFilterApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Listener"):
 		return &apisv1.ListenerApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ListenerEntry"):
+		return &apisv1.ListenerEntryApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ListenerEntryStatus"):
+		return &apisv1.ListenerEntryStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ListenerFilter"):
+		return &apisv1.ListenerFilterApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ListenerFilters"):
+		return &apisv1.ListenerFiltersApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ListenerNamespaces"):
 		return &apisv1.ListenerNamespacesApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ListenerSet"):
+		return &apisv1.ListenerSetApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ListenerSetSpec"):
+		return &apisv1.ListenerSetSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ListenerSetStatus"):
+		return &apisv1.ListenerSetStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ListenerStatus"):
 		return &apisv1.ListenerStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ListenerTLSConfig"):
@@ -170,12 +186,22 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apisv1.ObjectReferenceApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ParametersReference"):
 		return &apisv1.ParametersReferenceApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ParentGatewayReference"):
+		return &apisv1.ParentGatewayReferenceApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ParentReference"):
 		return &apisv1.ParentReferenceApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PolicyAncestorStatus"):
 		return &apisv1.PolicyAncestorStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PolicyStatus"):
 		return &apisv1.PolicyStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ReferenceGrant"):
+		return &apisv1.ReferenceGrantApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ReferenceGrantFrom"):
+		return &apisv1.ReferenceGrantFromApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ReferenceGrantSpec"):
+		return &apisv1.ReferenceGrantSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ReferenceGrantTo"):
+		return &apisv1.ReferenceGrantToApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("RouteGroupKind"):
 		return &apisv1.RouteGroupKindApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("RouteNamespaces"):
@@ -192,10 +218,34 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apisv1.SubjectAltNameApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("SupportedFeature"):
 		return &apisv1.SupportedFeatureApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TCPRoute"):
+		return &apisv1.TCPRouteApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TCPRouteRule"):
+		return &apisv1.TCPRouteRuleApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TCPRouteSpec"):
+		return &apisv1.TCPRouteSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TCPRouteStatus"):
+		return &apisv1.TCPRouteStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("TLSConfig"):
 		return &apisv1.TLSConfigApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("TLSPortConfig"):
 		return &apisv1.TLSPortConfigApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TLSRoute"):
+		return &apisv1.TLSRouteApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TLSRouteRule"):
+		return &apisv1.TLSRouteRuleApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TLSRouteSpec"):
+		return &apisv1.TLSRouteSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TLSRouteStatus"):
+		return &apisv1.TLSRouteStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("UDPRoute"):
+		return &apisv1.UDPRouteApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("UDPRouteRule"):
+		return &apisv1.UDPRouteRuleApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("UDPRouteSpec"):
+		return &apisv1.UDPRouteSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("UDPRouteStatus"):
+		return &apisv1.UDPRouteStatusApplyConfiguration{}
 
 		// Group=gateway.networking.k8s.io, Version=v1alpha2
 	case v1alpha2.SchemeGroupVersion.WithKind("GRPCRoute"):
@@ -232,8 +282,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apisv1alpha3.BackendTLSPolicyApplyConfiguration{}
 	case v1alpha3.SchemeGroupVersion.WithKind("TLSRoute"):
 		return &apisv1alpha3.TLSRouteApplyConfiguration{}
-	case v1alpha3.SchemeGroupVersion.WithKind("TLSRouteSpec"):
-		return &apisv1alpha3.TLSRouteSpecApplyConfiguration{}
 
 		// Group=gateway.networking.k8s.io, Version=v1beta1
 	case v1beta1.SchemeGroupVersion.WithKind("Gateway"):
@@ -244,42 +292,56 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apisv1beta1.HTTPRouteApplyConfiguration{}
 	case v1beta1.SchemeGroupVersion.WithKind("ReferenceGrant"):
 		return &apisv1beta1.ReferenceGrantApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ReferenceGrantFrom"):
-		return &apisv1beta1.ReferenceGrantFromApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ReferenceGrantSpec"):
-		return &apisv1beta1.ReferenceGrantSpecApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ReferenceGrantTo"):
-		return &apisv1beta1.ReferenceGrantToApplyConfiguration{}
 
 		// Group=gateway.networking.x-k8s.io, Version=v1alpha1
+	case v1alpha1.SchemeGroupVersion.WithKind("Attribute"):
+		return &apisxv1alpha1.AttributeApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("BackendAncestorStatus"):
+		return &apisxv1alpha1.BackendAncestorStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("BackendPort"):
+		return &apisxv1alpha1.BackendPortApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("BackendSpec"):
+		return &apisxv1alpha1.BackendSpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("BackendStatus"):
+		return &apisxv1alpha1.BackendStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("BackendTLS"):
+		return &apisxv1alpha1.BackendTLSApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("BackendTrafficPolicySpec"):
 		return &apisxv1alpha1.BackendTrafficPolicySpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("BudgetDetails"):
 		return &apisxv1alpha1.BudgetDetailsApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ListenerEntry"):
-		return &apisxv1alpha1.ListenerEntryApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ListenerEntryStatus"):
-		return &apisxv1alpha1.ListenerEntryStatusApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ListenerSetSpec"):
-		return &apisxv1alpha1.ListenerSetSpecApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ListenerSetStatus"):
-		return &apisxv1alpha1.ListenerSetStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("EndpointSelectorBackend"):
+		return &apisxv1alpha1.EndpointSelectorBackendApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ExternalHostnameBackend"):
+		return &apisxv1alpha1.ExternalHostnameBackendApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("LabelSelector"):
+		return &apisxv1alpha1.LabelSelectorApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("MeshSpec"):
 		return &apisxv1alpha1.MeshSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("MeshStatus"):
 		return &apisxv1alpha1.MeshStatusApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ParentGatewayReference"):
-		return &apisxv1alpha1.ParentGatewayReferenceApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ParentBasedSampling"):
+		return &apisxv1alpha1.ParentBasedSamplingApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("RequestRate"):
 		return &apisxv1alpha1.RequestRateApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("RetryConstraint"):
 		return &apisxv1alpha1.RetryConstraintApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("TelemetryPolicySpec"):
+		return &apisxv1alpha1.TelemetryPolicySpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("TelemetryPolicyStatus"):
+		return &apisxv1alpha1.TelemetryPolicyStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("TracingConfig"):
+		return &apisxv1alpha1.TracingConfigApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("TracingProvider"):
+		return &apisxv1alpha1.TracingProviderApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("XBackend"):
+		return &apisxv1alpha1.XBackendApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("XBackendTrafficPolicy"):
 		return &apisxv1alpha1.XBackendTrafficPolicyApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("XListenerSet"):
-		return &apisxv1alpha1.XListenerSetApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("XMesh"):
 		return &apisxv1alpha1.XMeshApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("XTelemetryPolicy"):
+		return &apisxv1alpha1.XTelemetryPolicyApplyConfiguration{}
 
 	}
 	return nil
