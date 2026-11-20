@@ -14,7 +14,7 @@ profiles:
           - manifests/demo
 build:
   artifacts:
-    - image: ghcr.io/shikanime-studio/tailscale-gateway/controller
+    - image: ghcr.io/shikanime-labs/tailscale-gateway/controller
       ko:
         dependencies:
           paths:

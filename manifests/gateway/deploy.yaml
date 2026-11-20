@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: controller
-          image: ghcr.io/shikanime-studio/tailscale-gateway/controller
+          image: ghcr.io/shikanime-labs/tailscale-gateway/controller
           envFrom:
             - secretRef:
                 name: tailscale-gateway-controller
