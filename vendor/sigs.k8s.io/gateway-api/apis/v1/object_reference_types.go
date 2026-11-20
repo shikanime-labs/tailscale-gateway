@@ -54,13 +54,13 @@ type SecretObjectReference struct {
 	//
 	// +optional
 	// +kubebuilder:default=""
-	Group *Group `json:"group"`
+	Group *Group `json:"group,omitempty"`
 
 	// Kind is kind of the referent. For example "Secret".
 	//
 	// +optional
 	// +kubebuilder:default=Secret
-	Kind *Kind `json:"kind"`
+	Kind *Kind `json:"kind,omitempty"`
 
 	// Name is the name of the referent.
 	// +required
@@ -96,7 +96,12 @@ type SecretObjectReference struct {
 // be rejected by the implementation, with appropriate Conditions set
 // on the containing object.
 //
+// If the backend service requires TLS, use BackendTLSPolicy to tell the
+// implementation to supply the TLS details to be used to connect to that
+// backend.
+//
 // +kubebuilder:validation:XValidation:message="Must have port for Service reference",rule="(size(self.group) == 0 && self.kind == 'Service') ? has(self.port) : true"
+// <gateway:experimental:validation:XValidation:message="Must not have port for Backend reference",rule="(self.group == 'gateway.networking.x-k8s.io' && self.kind == 'XBackend') ? !has(self.port) : true">
 type BackendObjectReference struct {
 	// Group is the group of the referent. For example, "gateway.networking.k8s.io".
 	// When unspecified or empty string, core API group is inferred.

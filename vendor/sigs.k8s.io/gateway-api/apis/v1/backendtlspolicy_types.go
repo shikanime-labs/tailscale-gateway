@@ -37,7 +37,7 @@ type BackendTLSPolicy struct {
 
 	// Spec defines the desired state of BackendTLSPolicy.
 	// +required
-	Spec BackendTLSPolicySpec `json:"spec"`
+	Spec BackendTLSPolicySpec `json:"spec,omitzero"`
 
 	// Status defines the current state of BackendTLSPolicy.
 	// +optional
@@ -57,8 +57,6 @@ type BackendTLSPolicyList struct {
 // Support: Extended
 type BackendTLSPolicySpec struct {
 	// TargetRefs identifies an API object to apply the policy to.
-	// Only Services have Extended support. Implementations MAY support
-	// additional objects, with Implementation Specific support.
 	// Note that this config applies to the entire referenced resource
 	// by default, but this default may change in the future to provide
 	// a more granular application of the policy.
@@ -71,7 +69,6 @@ type BackendTLSPolicySpec struct {
 	//   be unique across all targetRef entries in the BackendTLSPolicy.
 	// * They select different sectionNames in the same target.
 	//
-	//
 	// When more than one BackendTLSPolicy selects the same target and
 	// sectionName, implementations MUST determine precedence using the
 	// following criteria, continuing on ties:
@@ -80,9 +77,9 @@ type BackendTLSPolicySpec struct {
 	//   example, a policy with a creation timestamp of "2021-07-15
 	//   01:02:03" MUST be given precedence over a policy with a
 	//   creation timestamp of "2021-07-15 01:02:04".
-	// * The policy appearing first in alphabetical order by {name}.
-	//   For example, a policy named `bar` is given precedence over a
-	//   policy named `baz`.
+	// * The policy appearing first in alphabetical order by {namespace}/{name}.
+	//   For example, a policy named `foo/bar` is given precedence over a
+	//   policy named `foo/baz`.
 	//
 	// For any BackendTLSPolicy that does not take precedence, the
 	// implementation MUST ensure the `Accepted` Condition is set to
@@ -94,19 +91,44 @@ type BackendTLSPolicySpec struct {
 	// clarified in a future release, the safest approach is to support a single
 	// targetRef.
 	//
-	// Support: Extended for Kubernetes Service
+	// Support Levels:
 	//
-	// Support: Implementation-specific for any other resource
+	// * Extended: Kubernetes Service referenced by backendRefs used on a Route.
+	//   - HTTPRoute, GRPCRoute, TLSRoute with termination
+	//   - Filters that needs a backend of type Service, like Mirror and External Authorization
+	//
+	// * Implementation-Specific: Implementations MAY use BackendTLSPolicy for:
+	//   - Services not referenced by any Route (e.g., infrastructure services)
+	//   - Service mesh workload-to-service communication
+	//   - Other resource types beyond Service
+	//
+	// Implementations SHOULD aim to ensure that BackendTLSPolicy behavior is consistent,
+	// even outside of the extended HTTPRoute -(backendRef) -> Service path.
+	// They SHOULD clearly document how BackendTLSPolicy is interpreted in these
+	// scenarios, including:
+	//   - Which resources beyond Service are supported
+	//   - How the policy is discovered and applied
+	//   - Any implementation-specific semantics or restrictions
+	//
+	// Note that this config applies to the entire referenced resource
+	// by default, but this default may change in the future to provide
+	// a more granular application of the policy.
 	//
 	// +required
 	// +listType=atomic
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
+	// <gateway:util:excludeFromCRD>
+	// Mirrors the parentRefs consistency/uniqueness rules from CommonRouteSpec.ParentRefs.
+	// Requires distinct, non-empty sectionNames when the same target appears more than once.
+	// Namespace is not checked because targetRefs only supports same-namespace targets.
+	// </gateway:util:excludeFromCRD>
 	// +kubebuilder:validation:XValidation:message="sectionName must be specified when targetRefs includes 2 or more references to the same target",rule="self.all(p1, self.all(p2, p1.group == p2.group && p1.kind == p2.kind && p1.name == p2.name ? ((!has(p1.sectionName) || p1.sectionName == '') == (!has(p2.sectionName) || p2.sectionName == '')) : true))"
 	// +kubebuilder:validation:XValidation:message="sectionName must be unique when targetRefs includes 2 or more references to the same target",rule="self.all(p1, self.exists_one(p2, p1.group == p2.group && p1.kind == p2.kind && p1.name == p2.name && (((!has(p1.sectionName) || p1.sectionName == '') && (!has(p2.sectionName) || p2.sectionName == '')) || (has(p1.sectionName) && has(p2.sectionName) && p1.sectionName == p2.sectionName))))"
-	TargetRefs []LocalPolicyTargetReferenceWithSectionName `json:"targetRefs"`
+	TargetRefs []LocalPolicyTargetReferenceWithSectionName `json:"targetRefs,omitempty"`
 
 	// Validation contains backend TLS validation configuration.
+	//
 	// +required
 	Validation BackendTLSPolicyValidation `json:"validation"`
 
@@ -127,8 +149,13 @@ type BackendTLSPolicySpec struct {
 }
 
 // BackendTLSPolicyValidation contains backend TLS validation configuration.
-// +kubebuilder:validation:XValidation:message="must not contain both CACertificateRefs and WellKnownCACertificates",rule="!(has(self.caCertificateRefs) && size(self.caCertificateRefs) > 0 && has(self.wellKnownCACertificates) && self.wellKnownCACertificates != \"\")"
-// +kubebuilder:validation:XValidation:message="must specify either CACertificateRefs or WellKnownCACertificates",rule="(has(self.caCertificateRefs) && size(self.caCertificateRefs) > 0 || has(self.wellKnownCACertificates) && self.wellKnownCACertificates != \"\")"
+// <gateway:util:excludeFromCRD>
+// Standard channel only: exactly one of caCertificateRefs or wellKnownCACertificates
+// must be set.
+// </gateway:util:excludeFromCRD>
+// <gateway:standard:validation:XValidation:message="must not contain both CACertificateRefs and WellKnownCACertificates",rule="!(has(self.caCertificateRefs) && size(self.caCertificateRefs) > 0 && has(self.wellKnownCACertificates) && self.wellKnownCACertificates != \"\")">
+// <gateway:standard:validation:XValidation:message="must specify either CACertificateRefs or WellKnownCACertificates",rule="(has(self.caCertificateRefs) && size(self.caCertificateRefs) > 0 || has(self.wellKnownCACertificates) && self.wellKnownCACertificates != \"\")">
+// <gateway:experimental:validation:ExactlyOneOf=caCertificateRefs;wellKnownCACertificates>
 type BackendTLSPolicyValidation struct {
 	// CACertificateRefs contains one or more references to Kubernetes objects that
 	// contain a PEM-encoded TLS CA certificate bundle, which is used to
@@ -165,6 +192,13 @@ type BackendTLSPolicyValidation struct {
 	// ensure the `Accepted` Condition on the BackendTLSPolicy is set to
 	// `status: False`, with a Reason `NoValidCACertificate`.
 	//
+	// <gateway:experimental:description>
+	// References to cluster-scoped resources (such as ClusterTrustBundle)
+	// are supported: the implementation resolves the scope based on the kind.
+	// A single CACertificateRef to a ClusterTrustBundle uses the cluster-scoped
+	// resource by name. A reference to a namespaced resource (such as ConfigMap
+	// or Secret) uses the local namespace.
+	// </gateway:experimental:description>
 	//
 	// A single CACertificateRef to a Kubernetes ConfigMap kind has "Core" support.
 	// Implementations MAY choose to support attaching multiple certificates to
@@ -173,16 +207,26 @@ type BackendTLSPolicyValidation struct {
 	// Support: Core - An optional single reference to a Kubernetes ConfigMap,
 	// with the CA certificate in a key named `ca.crt`.
 	//
+	// <gateway:experimental:description>
+	// Support: Extended - A single reference to a ClusterTrustBundle (certificates.k8s.io).
+	// </gateway:experimental:description>
+	//
 	// Support: Implementation-specific - More than one reference, other kinds
 	// of resources, or a single reference that includes multiple certificates.
 	//
 	// +optional
 	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=8
+	// <gateway:util:excludeFromCRD>
+	// The standard channel rules reject an empty list via `size(...) > 0`, while the
+	// experimental ExactlyOneOf rule only tests for presence. MinItems keeps an empty
+	// list invalid in the experimental channel too.
+	// </gateway:util:excludeFromCRD>
+	// <gateway:experimental:validation:MinItems=1>
 	CACertificateRefs []LocalObjectReference `json:"caCertificateRefs,omitempty"`
 
-	// WellKnownCACertificates specifies whether system CA certificates may be used in
-	// the TLS handshake between the gateway and backend pod.
+	// WellKnownCACertificates specifies whether a well-known set of CA certificates
+	// may be used in the TLS handshake between the gateway and backend pod.
 	//
 	// If WellKnownCACertificates is unspecified or empty (""), then CACertificateRefs
 	// must be specified with at least one entry for a valid configuration. Only one of
@@ -192,10 +236,16 @@ type BackendTLSPolicyValidation struct {
 	// `Accepted` Condition on the BackendTLSPolicy is set to `status: False`, with
 	// a Reason `Invalid`.
 	//
+	// Valid values include:
+	// * "System" - indicates that well-known system CA certificates should be used.
+	//
+	// Implementations MAY define their own sets of CA certificates. Such definitions
+	// MUST use an implementation-specific, prefixed name, such as
+	// `mycompany.com/my-custom-ca-certificates`.
+	//
 	// Support: Implementation-specific
 	//
 	// +optional
-	// +listType=atomic
 	WellKnownCACertificates *WellKnownCACertificatesType `json:"wellKnownCACertificates,omitempty"`
 
 	// Hostname is used for two purposes in the connection between Gateways and
@@ -259,7 +309,9 @@ type SubjectAltName struct {
 
 // WellKnownCACertificatesType is the type of CA certificate that will be used
 // when the caCertificateRefs field is unspecified.
-// +kubebuilder:validation:Enum=System
+// +kubebuilder:validation:MinLength=1
+// +kubebuilder:validation:MaxLength=253
+// +kubebuilder:validation:Pattern=`^(System|([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9]))$`
 type WellKnownCACertificatesType string
 
 const (
