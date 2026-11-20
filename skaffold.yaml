@@ -14,7 +14,7 @@ profiles:
           - manifests/demo
 build:
   artifacts:
-    - image: ghcr.io/shikanime-studio/tailscale-gateway/controller
+    - image: ghcr.io/shikanime-labs/tailscale-gateway/controller
       ko:
         dependencies:
           paths:
@@ -22,7 +22,8 @@ build:
             - internal
             - go.mod
             - go.sum
-        dir: ./cmd/tailscale-gateway-controller
+        main: ./cmd/tailscale-gateway-controller
+        dir: .
         fromImage: cgr.dev/chainguard/glibc-dynamic
         labels:
           org.opencontainers.image.description:
