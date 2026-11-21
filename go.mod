@@ -15,7 +15,7 @@ require (
 	sigs.k8s.io/controller-runtime v0.25.3
 	sigs.k8s.io/gateway-api v1.7.0
 	tailscale.com v1.104.2
-	tailscale.com/client/tailscale/v2 v2.10.1
+	tailscale.com/client/tailscale/v2 v2.12.0
 )
 
 require (
