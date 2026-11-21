@@ -919,8 +919,8 @@ sigs.k8s.io/structured-merge-diff/v6/value
 # sigs.k8s.io/yaml v1.6.0
 ## explicit; go 1.22
 sigs.k8s.io/yaml
-# tailscale.com v1.104.2
-## explicit; go 1.27.3
+# tailscale.com v1.104.7
+## explicit; go 1.27.4
 tailscale.com
 tailscale.com/atomicfile
 tailscale.com/drive
