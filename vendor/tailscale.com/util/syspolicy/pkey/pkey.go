@@ -135,6 +135,9 @@ const (
 	LogSCMInteractions      Key = "LogSCMInteractions"
 	FlushDNSOnSessionUnlock Key = "FlushDNSOnSessionUnlock"
 
+	// HideWindowedUI is a boolean policy that hides the Windows windowed UI.
+	// It does not close an already-open window.
+	HideWindowedUI Key = "HideWindowedUI"
 	// EncryptState is a boolean setting that specifies whether to encrypt the
 	// tailscaled state file.
 	// Windows and Linux use a TPM device, Apple uses the Keychain.
@@ -187,4 +190,7 @@ const (
 
 	// AllowedSuggestedExitNodes's string array value is a list of exit node IDs that restricts which exit nodes are considered when generating suggestions for exit nodes.
 	AllowedSuggestedExitNodes Key = "AllowedSuggestedExitNodes"
+	// HiddenNetworkDevices specifies categories of network devices that GUI
+	// clients should omit from device lists.
+	HiddenNetworkDevices Key = "HiddenNetworkDevices"
 )

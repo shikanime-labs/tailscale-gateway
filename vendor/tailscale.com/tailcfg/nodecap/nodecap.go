@@ -91,6 +91,15 @@ const (
 	// server, DERP servers, etc.)
 	DebugTSDNSResolution Cap = "https://tailscale.com/cap/debug-ts-dns-resolution"
 
+	// DisableHybridHandshakes indicates that the node should not use hybrid
+	// PQ wireguard handshakes to communicate with peers that support hybrid
+	// handshakes.
+	// 2026-11-03: This is a temporary panic disable attribute intended to reduce
+	// the risk of the initial rollout of hybrid handshakes. It will eventually
+	// be deleted to remove the control server's ability to downgrade hybrid
+	// handshakes.
+	DisableHybridHandshakes Cap = "https://tailscale.com/cap/disable-hybrid-handshakes"
+
 	// FunnelPorts specifies the ports that the Funnel is available on.
 	// The ports are specified as a comma-separated list of port numbers or port
 	// ranges (e.g. "80,443,8080-8090") in the ports query parameter.
@@ -189,6 +198,17 @@ const (
 
 	// LogExitFlows enables exit node destinations in network flow logs.
 	LogExitFlows Cap = "log-exit-flows"
+
+	// LogUploadAuth specifies the HTTP Authorization token
+	// to use when uploading logs. The CapMap value is a JSON string containing
+	// the token. Control pushes a refreshed token via netmap CapMap updates before
+	// the previous token expires. The client caches the latest value and
+	// does not fetch refreshes itself.
+	//
+	// The value is a secret. The client removes this capability from the netmap
+	// before publishing it, so the token does not appear in local status, WhoIs,
+	// netmap notifications, the on-disk netmap cache, or debug netmap dumps.
+	LogUploadAuth Cap = "log-upload-auth"
 
 	// AutoExitNode permits the automatic exit nodes feature.
 	AutoExitNode Cap = "auto-exit-node"
