@@ -93,7 +93,7 @@ type Status struct {
 // TKAKey describes a key trusted by tailnet lock.
 type TKAKey struct {
 	Kind     string
-	Key      key.NLPublic
+	Key      key.TLPublic
 	Metadata map[string]string
 	Votes    uint
 }
@@ -121,7 +121,7 @@ type TailnetLockStatus struct {
 
 	// PublicKey describes the node's tailnet-lock public key.
 	// It may be zero if the node has not logged in.
-	PublicKey key.NLPublic
+	PublicKey key.TLPublic
 
 	// NodeKey describes the node's current node-key. This field is not
 	// populated if the node is not operating (i.e. waiting for a login).
@@ -370,7 +370,7 @@ func (ps *PeerStatus) HasCap(cap nodecap.Cap) bool {
 // Examples: an exit node, a subnet router, an app connector, etc.
 // It is the analogue of [tailcfg.Node.IsRouter].
 func (ps *PeerStatus) IsRouter() bool {
-	// TODO(sfllaw): Keep this aligned with dbx.Node.IsSubnetRouter.
+	// TODO(sfllaw): Keep this aligned with dbx.Node.IsRouter.
 	if ps.AllowedIPs == nil {
 		return false
 	}
@@ -386,6 +386,11 @@ func (ps *PeerStatus) IsRouter() bool {
 // IsTagged reports whether ps is tagged.
 func (ps *PeerStatus) IsTagged() bool {
 	return ps.Tags != nil && ps.Tags.Len() > 0
+}
+
+// IsConn25Connector reports whether ps describes a conn25 connector.
+func (ps *PeerStatus) IsConn25Connector() bool {
+	return ps.HasCap(nodecap.Conn25Connector)
 }
 
 // StatusBuilder is a request to construct a Status. A new StatusBuilder is

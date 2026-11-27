@@ -121,7 +121,7 @@
         # things, but for now, we hardcode the default of port 41641 (taken from
         # ./cmd/tailscaled/tailscaled.defaults).
         postInstall =
-          pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+          pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
             wrapProgram $out/bin/tailscaled --prefix PATH : ${pkgs.lib.makeBinPath [pkgs.iproute2 pkgs.iptables pkgs.getent pkgs.shadow]}
             wrapProgram $out/bin/tailscale --suffix PATH : ${pkgs.lib.makeBinPath [pkgs.procps]}
 
@@ -154,7 +154,6 @@
           graphviz
           perl
           go_1_27
-          yarn
 
           # qemu and e2fsprogs are needed for natlab
           qemu
@@ -173,4 +172,4 @@
     });
   };
 }
-# nix-direnv cache busting line: sha256-VxuDS8QKZ82W/MOlfng0+ZCPSPl5KnK3FYW1puDiNe4=
+# nix-direnv cache busting line: sha256-CEZxW9kZUIjI3frTZOEKssYJz3Uo58+YdLm8iEjTeMo=
